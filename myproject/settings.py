@@ -34,6 +34,11 @@ def _load_dotenv(path):
 
 _load_dotenv(BASE_DIR / '.env')
 
+# The AI model loads on a background thread inside gunicorn; HF tokenizers' own thread pool can
+# deadlock there, so keep tokenizers and the ONNX runtime single-threaded.
+os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+
 
 def env_bool(name, default=False):
     return os.environ.get(name, str(default)).strip().lower() in ('1', 'true', 'yes', 'on')
