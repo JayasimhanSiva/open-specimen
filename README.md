@@ -2,7 +2,7 @@
 
 An index of 40 open-source typefaces with a live type tester, an AI font matcher, and an AI type assistant on every page. The assistant recommends fonts for any project, suggests pairings, compares typefaces, gives you the CSS, reviews the typography of your own website, answers FAQs, explains error codes and opens support tickets.
 
-**Live site:** _deployment in progress — link added after the first deploy_
+**Live site:** https://open-specimen.onrender.com (free Render instance: after 15 idle minutes the first visit takes about a minute to wake it up)
 **Repository:** https://github.com/JayasimhanSiva/open-specimen
 
 Built with Django 6.1 in VS Code, tested end to end with Playwright.
@@ -73,7 +73,7 @@ myproject/
     ├── static/            site.css, site.js
     ├── migrations/        schema + seed data (40 typefaces, FAQs, error codes)
     ├── admin.py
-    └── tests.py           60 Playwright browser tests
+    └── tests.py           61 Playwright browser tests
 ```
 
 ## Run it locally
@@ -99,7 +99,7 @@ python manage.py test myapp
 
 ## Testing
 
-- **60 Playwright browser tests** cover:
+- **61 Playwright browser tests** cover:
   - every page and the chat widget on each one
   - sign-up, username log-in and log-out
   - the staff dashboard
@@ -114,6 +114,19 @@ python manage.py test myapp
   - 600 concurrent page requests (no server errors)
   - the chat rate limit under load
   - more than 100 varied assistant prompts, including reviews of real public websites
+- **Live checks** against https://open-specimen.onrender.com, run with Playwright:
+  - every page on desktop and phone over HTTPS, with no sideways scrolling and the chat widget present
+  - the custom 404 and its "Ask the assistant" button
+  - no console errors
+  - assistant answers to FAQs, error codes, recommendations, pairings and website reviews
+
+## Running on a small server
+
+The free Render instance has 512 MB of memory and a tenth of a CPU, and the code is tuned for that:
+- The AI model runs on one thread with small batches, which peaks at about 260 MB instead of over 700 MB.
+- The embeddings of every typeface, FAQ and error code are computed during the build and loaded at startup.
+- Requests that arrive while the model is still loading are answered by keyword matching instead of waiting.
+- MongoDB writes happen on a background thread, so a slow database never delays an answer.
 
 ## Environment variables
 
