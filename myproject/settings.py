@@ -122,7 +122,10 @@ DATABASES = {
 # memory only and /health/ reports MongoDB as "not configured".
 MONGODB_URI = os.environ.get('MONGODB_URI', '')
 MONGODB_DB = os.environ.get('MONGODB_DB', 'open_specimen')
-MONGODB_TIMEOUT_MS = 2000
+# Generous, because the TLS handshake to Atlas is slow on a small instance; writes happen in the
+# background (MONGODB_ASYNC) so visitors never wait for them. Tests write synchronously.
+MONGODB_TIMEOUT_MS = int(os.environ.get('MONGODB_TIMEOUT_MS', '8000'))
+MONGODB_ASYNC = not TESTING
 
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'open-specimen'}}
 

@@ -504,7 +504,8 @@ input[type="range"]:focus-visible { outline: none; }
 .check__status { grid-column: 5 / 7; display: inline-flex; align-items: center; gap: 8px; }
 .check__status i { width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
 .check--ok .check__status i { background: #1F8A4C; }
-.check--degraded .check__status i, .check--loading .check__status i, .check--not-configured .check__status i { background: #C98A1A; }
+.check--degraded .check__status i, .check--loading .check__status i, .check--not-configured .check__status i,
+.check--checking .check__status i { background: #C98A1A; }
 .check--down .check__status i { background: #C0341D; }
 .check__detail { grid-column: 7 / 13; color: var(--mute); overflow-wrap: anywhere; }
 .health-facts { padding-block: var(--s-8) var(--s-16); }

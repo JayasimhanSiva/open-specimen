@@ -1346,7 +1346,8 @@ def run_checks():
         checks.append(("AI model", "loading", "Loads in the background after a restart"))
     checks.append(("GitHub API", *github_status()))
     sql_ok = checks[0][1] == "ok"
-    overall = "ok" if all(c[1] in ("ok", "not configured", "loading") for c in checks) else ("degraded" if sql_ok else "down")
+    overall = "ok" if all(c[1] in ("ok", "not configured", "loading", "checking") for c in checks) else (
+        "degraded" if sql_ok else "down")
     return overall, checks
 
 

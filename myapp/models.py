@@ -1,3 +1,6 @@
+import logging
+import queue
+import threading
 from urllib.parse import urlencode
 
 from django.db import models
@@ -169,6 +172,9 @@ class DocumentStore:
         self._client = None
         self._error = ""
         self.memory = {"chat_logs": [], "feedback": []}  # used when MongoDB isn't configured
+        self._queue = queue.Queue(maxsize=2000)
+        self._writer = None
+        self._writer_lock = threading.Lock()
 
     @property
     def configured(self):
@@ -190,34 +196,64 @@ class DocumentStore:
         return self._client[settings.MONGODB_DB]
 
     def insert(self, collection, doc):
-        """Store a document; returns its id as a string. Never raises."""
-        import logging
+        """Store a document and return its id. Never raises, and in production never makes the visitor
+        wait: the id is made here and the write happens on a background thread."""
         from bson import ObjectId
-        doc = {**doc}
+        from django.conf import settings
+        doc = {**doc, "_id": ObjectId()}
         db = self._db()
         if db is None:
-            doc["_id"] = ObjectId()
             self.memory[collection].append(doc)
             del self.memory[collection][:-500]
-            return str(doc["_id"])
+        elif settings.MONGODB_ASYNC:
+            self._start_writer()
+            try:
+                self._queue.put_nowait((collection, doc))
+            except queue.Full:
+                logging.getLogger("myapp").warning("MongoDB write queue full; dropped a %s document", collection)
+        else:
+            self._write(db, collection, doc)
+        return str(doc["_id"])
+
+    def _write(self, db, collection, doc):
         try:
-            result = db[collection].insert_one(doc)
+            db[collection].insert_one(doc)
             self._error = ""
-            return str(result.inserted_id)
         except Exception as exc:
             self._error = f"{type(exc).__name__}: {exc}"[:200]
             logging.getLogger("myapp").warning("MongoDB insert into %s failed: %s", collection, self._error)
-            return ""
+
+    def _start_writer(self):
+        if self._writer and self._writer.is_alive():
+            return
+        with self._writer_lock:
+            if self._writer and self._writer.is_alive():
+                return
+
+            def run():
+                while True:
+                    collection, doc = self._queue.get()
+                    db = self._db()
+                    if db is not None:
+                        self._write(db, collection, doc)
+
+            self._writer = threading.Thread(target=run, name="mongo-writer", daemon=True)
+            self._writer.start()
 
     def find(self, collection, query=None, limit=20):
+        """Newest documents first; an empty list (not an error page) when MongoDB is unreachable."""
         db = self._db()
         if db is None:
             docs = [d for d in self.memory[collection] if all(d.get(k) == v for k, v in (query or {}).items())]
             return list(reversed(docs))[:limit]
-        return list(db[collection].find(query or {}).sort("created", -1).limit(limit))
+        try:
+            return list(db[collection].find(query or {}).sort("created", -1).limit(limit))
+        except Exception as exc:
+            self._error = f"{type(exc).__name__}: {exc}"[:200]
+            logging.getLogger("myapp").warning("MongoDB read from %s failed: %s", collection, self._error)
+            return []
 
-    def ping(self):
-        """(status, detail) for the health page."""
+    def _ping_now(self):
         import time
         db = self._db()
         if db is None:
@@ -229,6 +265,29 @@ class DocumentStore:
             return "ok", f"{counts} · {round((time.perf_counter() - started) * 1000)} ms"
         except Exception as exc:
             return "down", f"{type(exc).__name__}: {str(exc)[:160]}"
+
+    def ping(self):
+        """(status, detail) for the health page. In production the check runs in the background and
+        the page shows the latest result, so a slow database never makes the health check slow."""
+        import time
+        from django.conf import settings
+        if not settings.MONGODB_ASYNC or not self.configured:
+            return self._ping_now()
+        last = getattr(self, "_last_ping", None)
+        if last is None or time.monotonic() - last[0] > 30:
+            if not getattr(self, "_pinging", False):
+                self._pinging = True
+
+                def run():
+                    try:
+                        self._last_ping = (time.monotonic(), self._ping_now())
+                    finally:
+                        self._pinging = False
+
+                threading.Thread(target=run, name="mongo-ping", daemon=True).start()
+        if last is None:
+            return "checking", "Connecting to MongoDB; reload in a few seconds."
+        return last[1]
 
 
 documents = DocumentStore()

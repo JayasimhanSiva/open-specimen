@@ -710,6 +710,22 @@ class BrowserTests(StaticLiveServerTestCase):
         expect(self.page.locator(".notice")).to_contain_text("marked answered")
         self.assertEqual(SupportTicket.objects.get().status, "answered")
 
+    def test_staff_dashboard_survives_a_mongodb_outage(self):
+        self.user.is_staff = True
+        self.user.save()
+
+        class Down:
+            def __getitem__(self, name):
+                raise RuntimeError("MongoDB unreachable")
+
+            def command(self, *a):
+                raise RuntimeError("MongoDB unreachable")
+
+        with mock.patch.object(documents, "_db", return_value=Down()):
+            self.assertEqual(self.page.goto(self.url("/staff/")).status, 200)
+            expect(self.page.locator(".staff__mongo")).to_contain_text("down")
+            expect(self.page.locator("#chats-h + .staff-main")).to_contain_text("No chats yet.")
+
     def test_index_lists_forty_typefaces(self):
         self.assertGreaterEqual(Typeface.objects.count(), 40)
         self.page.goto(self.url("/?class=mono#index"))
