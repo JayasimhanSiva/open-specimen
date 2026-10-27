@@ -196,6 +196,9 @@ LOGOUT_REDIRECT_URL = 'myapp:login'
 # CPU: free, no API key, no network after the first download (~70 MB).
 MATCHER_MODEL = 'BAAI/bge-small-en-v1.5'
 MATCHER_CACHE_DIR = os.environ.get('MATCHER_CACHE_DIR', str(Path.home() / '.cache' / 'fastembed'))
+# Small batches on one thread keep the model's working memory low (the free Render plan has 512 MB).
+MATCHER_THREADS = int(os.environ.get('MATCHER_THREADS', '1'))
+MATCHER_BATCH = int(os.environ.get('MATCHER_BATCH', '8'))
 
 # Third-party API: GitHub REST (google/fonts history). A token only raises the rate limit.
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')

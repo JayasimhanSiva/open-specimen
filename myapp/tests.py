@@ -474,7 +474,7 @@ class BrowserTests(StaticLiveServerTestCase):
         before = bots.count()
         page.locator("#assistant-input").fill(text)
         page.get_by_role("button", name="Send").click()
-        expect(bots).to_have_count(before + 1)
+        expect(bots).to_have_count(before + 1, timeout=60000)  # the first reply may wait for the model to load
         return bots.last
 
     def test_faq_page_lists_faqs_from_the_database(self):

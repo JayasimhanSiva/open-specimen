@@ -144,8 +144,9 @@ class FontMatcher:
                 return
             try:
                 from fastembed import TextEmbedding
+                # One thread and small batches keep memory low enough for a 512 MB server
                 self._model = TextEmbedding(settings.MATCHER_MODEL, cache_dir=settings.MATCHER_CACHE_DIR,
-                                            providers=["CPUExecutionProvider"])
+                                            providers=["CPUExecutionProvider"], threads=settings.MATCHER_THREADS)
             except Exception:  # missing package, no network for the first download, corrupt cache…
                 log.exception("Font matcher model unavailable; falling back to keyword matching")
                 self._failed = True
@@ -155,7 +156,7 @@ class FontMatcher:
         import numpy as np
         missing = [t for t in dict.fromkeys(texts) if t not in self._vectors]
         if missing:
-            for t, v in zip(missing, self._model.embed(missing)):
+            for t, v in zip(missing, self._model.embed(missing, batch_size=settings.MATCHER_BATCH)):
                 v = np.asarray(v, dtype="float32")
                 self._vectors[t] = v / (np.linalg.norm(v) or 1.0)
         return [self._vectors[t] for t in texts]
