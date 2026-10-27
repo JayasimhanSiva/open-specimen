@@ -54,6 +54,9 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,[::1]').split(',') if h.strip()]
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
+# Behind a reverse proxy (Render), the client IP comes from the proxy's X-Forwarded-For entry.
+BEHIND_PROXY = env_bool('BEHIND_PROXY', bool(os.environ.get('RENDER')))
+
 # Render tells the app its public hostname.
 if render_host := os.environ.get('RENDER_EXTERNAL_HOSTNAME'):
     ALLOWED_HOSTS.append(render_host)

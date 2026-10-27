@@ -111,6 +111,23 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   });
 })();
 
+// Big titles: shrink until the longest word fits its column (long names like "Merriweather" on phones)
+(() => {
+  const els = document.querySelectorAll("[data-fit]");
+  if (!els.length) return;
+  const fit = () => els.forEach(el => {
+    el.style.fontSize = "";
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    for (let i = 0; i < 40 && el.scrollWidth > el.clientWidth + 1 && size > 14; i++) {
+      size *= 0.94;
+      el.style.fontSize = `${size}px`;
+    }
+  });
+  document.fonts.ready.then(fit);
+  let lastW = innerWidth;
+  addEventListener("resize", () => { if (innerWidth !== lastW) { lastW = innerWidth; fit(); } });
+})();
+
 // Type tester: size and variable axes
 (() => {
   const text = document.querySelector(".tester__text");
@@ -365,7 +382,23 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const botBubble = (data, question) => {
     const li = el("li", { className: "msg msg--bot" + (data.error ? " msg--error" : "") }, el("p", { textContent: data.text }));
-    if (data.source) li.append(el("a", { className: "msg__source", href: data.source.url, textContent: `Source: ${data.source.title}` }));
+    if (data.items && data.items.length) {  // website review: what to change, where and why
+      const ol = el("ol", { className: "msg__items" });
+      data.items.forEach(it => ol.append(el("li", {},
+        el("b", { textContent: `${it.where}: ${it.change}` }), el("span", { textContent: it.why }))));
+      li.append(ol);
+    }
+    if (data.code) {
+      const pre = el("pre", {}, el("code", { textContent: data.code }));
+      const copy = el("button", { type: "button", className: "msg__copy", textContent: "Copy" });
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(data.code); copy.textContent = "Copied"; }
+        catch (e) { copy.textContent = "Select and copy"; }
+        setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+      });
+      li.append(el("div", { className: "msg__code" }, pre, copy));
+    }
+    if (data.source) li.append(el("a", { className: "msg__source", href: data.source.url, textContent: data.kind === "faq" || data.kind === "error_code" ? `Source: ${data.source.title}` : data.source.title }));
     if (data.related && data.related.length) {
       const rel = el("div", { className: "msg__related" });
       data.related.forEach(r => rel.append(el("button", { className: "chip", type: "button", textContent: r, onclick: () => ask(r) })));

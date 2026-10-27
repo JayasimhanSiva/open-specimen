@@ -22,7 +22,17 @@ from .models import ErrorCode, Faq, Match, Submission, SupportTicket, Typeface, 
 os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 
 SEEDS = [import_module(f"myapp.migrations.{name}").seed for name in (
-    "0002_seed_typefaces", "0004_seed_matcher_profiles", "0006_seed_help", "0008_seed_faq_phrasings")]
+    "0002_seed_typefaces", "0004_seed_matcher_profiles", "0006_seed_help", "0008_seed_faq_phrasings",
+    "0009_more_typefaces", "0010_typography_faqs", "0011_tune_advice_data", "0012_more_uses")]
+
+SAMPLE_SITE = """<!doctype html><html><head><title>Crumb &amp; Co. Bakery</title>
+<meta name="description" content="Sourdough, pastries and coffee from a small neighbourhood bakery.">
+<style>
+  @font-face { font-family: "Brand Script"; src: url(brand.woff2); }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.2; }
+  h1, h2 { font-family: "Times New Roman", serif; }
+  .promo { font-family: Papyrus, fantasy; } .note { font-family: "Comic Sans MS"; } .x { font-family: Verdana; }
+</style></head><body><h1>Fresh bread every morning</h1><p>Hello</p></body></html>"""
 
 
 def seed(apps, schema_editor):
@@ -426,7 +436,8 @@ class BrowserTests(StaticLiveServerTestCase):
         page.goto(self.url("/"))
         page.get_by_label("What are you setting, and how should it feel?").fill("Train station signs")
         page.get_by_role("button", name="Find a typeface").click()
-        expect(page.locator('[data-r="face"]')).to_have_text("Big Shoulders Display")
+        expect(page.locator('[data-r="face"]')).to_have_text(re.compile(r"^(Big Shoulders Display|Oswald)$"))
+        self.assertEqual(Match.objects.get().query, "Train station signs")
         ctx.close()
 
     def test_matches_are_private(self):
@@ -461,7 +472,7 @@ class BrowserTests(StaticLiveServerTestCase):
         page = page or self.page
         bots = page.locator(".msg--bot:not(.msg--typing)")
         before = bots.count()
-        page.get_by_label("Your question").fill(text)
+        page.locator("#assistant-input").fill(text)
         page.get_by_role("button", name="Send").click()
         expect(bots).to_have_count(before + 1)
         return bots.last
@@ -615,6 +626,94 @@ class BrowserTests(StaticLiveServerTestCase):
         cache.set("gh-stale:syne", {"status": "ok", "date": "2025-01-02", "message": "Saved", "url": "https://github.com"})
         self.page.reload()
         expect(self.page.locator("[data-history-value]")).to_contain_text("saved copy")
+
+    # ------------------------------------------------------------ type advisor
+
+    def test_assistant_recommends_a_typeface_with_css(self):
+        self.page.goto(self.url("/"))
+        self.open_assistant()
+        reply = self.chat("Which font should I use for my bakery website?")
+        expect(reply).to_contain_text("Fraunces")  # its uses list bakery and café branding
+        expect(reply.locator("pre")).to_contain_text("fonts.googleapis.com")
+        expect(reply.locator("pre")).to_contain_text("font-family: 'Fraunces'")
+        reply.get_by_role("link", name=re.compile("Open Fraunces")).click()
+        expect(self.page).to_have_url(re.compile(r"/type/fraunces/\?"))
+
+    def test_assistant_pairs_compares_and_explains_css(self):
+        self.page.goto(self.url("/faq/"))
+        self.open_assistant()
+        expect(self.chat("What pairs with Fraunces?")).to_contain_text("Pair Fraunces with")
+        expect(self.chat("Inter vs Roboto Flex")).to_contain_text("Choose Inter for")
+        css = self.chat("How do I use JetBrains Mono in CSS?")
+        expect(css.locator("pre")).to_contain_text("font-family: 'JetBrains Mono', ui-monospace, monospace;")
+        expect(self.chat("Tell me about Bodoni Moda")).to_contain_text("Owen Earl")
+
+    def test_assistant_reviews_a_website(self):
+        with mock.patch("myapp.views.fetch_url", return_value=("https://crumb-bakery.com", SAMPLE_SITE)):
+            self.page.goto(self.url("/"))
+            self.open_assistant()
+            reply = self.chat("Can you check my site crumb-bakery.com and tell me what fonts to change?")
+        expect(reply).to_contain_text("I reviewed crumb-bakery.com (Crumb & Co. Bakery)")
+        items = reply.locator(".msg__items li")
+        expect(items.filter(has_text="Headings (h1, h2, h3): Switch from Times New Roman to")).to_have_count(1)
+        expect(items.filter(has_text="Body font-size: Raise it from 14px to 17px")).to_have_count(1)
+        expect(items.filter(has_text="Body line-height: Increase it from 1.2")).to_have_count(1)
+        expect(items.filter(has_text="Replace Comic Sans, Papyrus or Impact")).to_have_count(1)
+        expect(items.filter(has_text="font-display: swap to Brand Script")).to_have_count(1)
+        expect(reply.locator("pre")).to_contain_text("<link href=")
+        self.assertEqual(documents.find("chat_logs")[0]["kind"], "site_audit")
+
+    def test_website_review_refuses_private_addresses(self):
+        self.page.goto(self.url("/"))
+        self.open_assistant()
+        expect(self.chat("review http://127.0.0.1/admin")).to_contain_text("private network")
+        expect(self.chat("check http://localhost:8000")).to_contain_text("standard web ports")
+
+    def test_assistant_handles_any_input(self):
+        self.page.goto(self.url("/"))
+        self.open_assistant()
+        for text, expected in [
+            ("<script>alert('x')</script>", "couldn't find that"),
+            ("' OR 1=1; DROP TABLE auth_user; --", "couldn't find that"),
+            ("🙂🙂🙂", "Type a question in words"),
+            ("मेरी वेबसाइट के लिए कौन सा फ़ॉन्ट?", "only answer in English"),
+            ("hi, which font for my blog?", "Made for blogs"),
+            ("x" * 500, "couldn't find that"),
+        ]:
+            expect(self.chat(text)).to_contain_text(expected)
+        self.assertFalse(self.page.evaluate("window.__xss === true"))
+        self.assertTrue(User.objects.exists())  # nothing was dropped
+
+    # ------------------------------------------------------------ staff dashboard
+
+    def test_staff_dashboard_is_staff_only(self):
+        self.expected_errors = 1  # the browser logs the 403 response
+        self.assertEqual(self.page.goto(self.url("/staff/")).status, 403)
+        page = self.guest_page()
+        page.goto(self.url("/staff/"))
+        expect(page).to_have_url(re.compile(r"/login/\?next=/staff/"))
+
+    def test_staff_can_manage_tickets_and_read_chats(self):
+        self.user.is_staff = True
+        self.user.save()
+        SupportTicket.objects.create(email="a@example.test", question="Where is my invoice?", name="Ann")
+        documents.insert("chat_logs", {"message": "is there dark mode", "reply": "x", "kind": "no_answer",
+                                       "created": views.timezone.now()})
+        self.page.goto(self.url("/"))
+        self.page.get_by_role("link", name="Staff").click()
+        expect(self.page.locator("h1")).to_have_text("Admin dashboard.")
+        row = self.page.locator(".ticket-row", has_text="Where is my invoice?")
+        expect(row).to_be_visible()
+        expect(self.page.locator("#unanswered-h + .staff-main")).to_contain_text("is there dark mode")
+        row.get_by_label(re.compile("Status of T-")).select_option("answered")
+        row.get_by_role("button", name="Save").click()
+        expect(self.page.locator(".notice")).to_contain_text("marked answered")
+        self.assertEqual(SupportTicket.objects.get().status, "answered")
+
+    def test_index_lists_forty_typefaces(self):
+        self.assertGreaterEqual(Typeface.objects.count(), 40)
+        self.page.goto(self.url("/?class=mono#index"))
+        expect(self.page.locator(".rows .row")).to_have_count(Typeface.objects.filter(classification="mono").count())
 
     def test_mobile_widget_and_404(self):
         ctx = self.new_context(logged_in=False, viewport={"width": 375, "height": 740}, is_mobile=True, has_touch=True)

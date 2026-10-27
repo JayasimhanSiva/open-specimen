@@ -5,7 +5,7 @@
 <article class="specimen" style="--face: '{{ face.name }}'">
   <header class="wrap grid specimen__head">
     <a class="label mono back" href="{% url 'myapp:home' %}#index">← Index</a>
-    <h1 class="specimen__name">{{ face.name }}</h1>
+    <h1 class="specimen__name" data-fit>{{ face.name }}</h1>
     <dl class="facts">
       <div class="f1"><dt class="mono">Designer</dt><dd>{{ face.designer }}</dd></div>
       <div class="f2"><dt class="mono">Year</dt><dd>{{ face.year }}</dd></div>
@@ -70,6 +70,6 @@
 
 <a class="wrap grid next" href="{{ next.get_absolute_url }}" style="--face: '{{ next.name }}'">
   <span class="label mono">Next</span>
-  <span class="next__name">{{ next.name }} <span aria-hidden="true">→</span></span>
+  <span class="next__name" data-fit>{{ next.name }} <span aria-hidden="true">→</span></span>
 </a>
 {% endblock %}

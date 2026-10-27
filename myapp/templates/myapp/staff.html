@@ -1,0 +1,76 @@
+{% extends "myapp/base.html" %}
+{% block title %}Staff — Open Specimen{% endblock %}
+{% block content %}
+<section class="wrap grid page-intro">
+  <p class="label mono">Staff</p>
+  <h1 class="page-intro__title">Admin dashboard.</h1>
+  <p class="page-intro__lede">Tickets, what visitors ask the assistant, and how helpful it was. Edit FAQs, error codes, typefaces and accounts in the <a href="{% url 'admin:index' %}">full admin</a>.</p>
+</section>
+
+<section class="wrap" aria-label="Numbers">
+  <dl class="stats">
+    {% for label, value in stats %}<div class="stat"><dt class="mono">{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+  </dl>
+  <p class="staff__mongo mono">MongoDB: {{ mongo.0 }} — {{ mongo.1 }}</p>
+</section>
+
+<section class="wrap grid staff-block" aria-labelledby="tickets-h">
+  <h2 class="label mono" id="tickets-h">Support tickets</h2>
+  <div class="staff-main">
+    {% for m in messages %}<p class="notice" role="status">{{ m }}</p>{% endfor %}
+    <nav class="filters filters--small" aria-label="Ticket status">
+      {% for value, label in statuses %}<a href="?status={{ value }}"{% if status == value %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      <a href="?status=all"{% if status == "all" %} aria-current="true"{% endif %}>All</a>
+    </nav>
+    <ol class="tickets">
+      {% for t in tickets %}
+      <li class="ticket-row">
+        <div class="ticket-row__main">
+          <p class="mono ticket-row__ref">{{ t.reference }} · {{ t.created|date:"j M Y, H:i" }} · {{ t.get_status_display }}</p>
+          <p class="ticket-row__q">{{ t.question }}</p>
+          <p class="ticket-row__who">{{ t.name|default:"No name" }} · <a href="mailto:{{ t.email }}">{{ t.email }}</a>{% if t.user %} · account {{ t.user.username }}{% endif %}</p>
+        </div>
+        <form method="post" action="{% url 'myapp:staff_ticket' t.pk %}" class="ticket-row__form">
+          {% csrf_token %}
+          <input type="hidden" name="back" value="{{ status }}">
+          <label class="visually-hidden" for="st-{{ t.pk }}">Status of {{ t.reference }}</label>
+          <select id="st-{{ t.pk }}" name="status">
+            {% for value, label in statuses %}<option value="{{ value }}"{% if t.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          <button class="button button--ghost" type="submit">Save</button>
+        </form>
+      </li>
+      {% empty %}
+      <li class="empty">No {{ status }} tickets.</li>
+      {% endfor %}
+    </ol>
+  </div>
+</section>
+
+<section class="wrap grid staff-block" aria-labelledby="unanswered-h">
+  <h2 class="label mono" id="unanswered-h">Couldn't answer</h2>
+  <div class="staff-main">
+    <p class="staff-hint">Questions the assistant had no answer for. Turn the common ones into FAQs.</p>
+    <ul class="chatlog">
+      {% for e in unanswered %}<li><span class="mono">{{ e.created|date:"j M, H:i" }}</span> {{ e.message }}</li>
+      {% empty %}<li class="empty">Nothing yet.</li>{% endfor %}
+    </ul>
+  </div>
+</section>
+
+<section class="wrap grid staff-block" aria-labelledby="chats-h">
+  <h2 class="label mono" id="chats-h">Recent chats</h2>
+  <div class="staff-main">
+    <p class="staff-hint">{% for kind, n in kinds %}{{ kind }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+    <ul class="chatlog">
+      {% for e in recent %}
+      <li>
+        <span class="mono">{{ e.created|date:"j M, H:i" }} · {{ e.kind }}{% if e.user %} · {{ e.user }}{% endif %}</span>
+        <b>{{ e.message }}</b>
+        <span class="chatlog__reply">{{ e.reply|truncatechars:220 }}</span>
+      </li>
+      {% empty %}<li class="empty">No chats yet.</li>{% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}

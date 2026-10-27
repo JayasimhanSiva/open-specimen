@@ -10,8 +10,11 @@ services:
       pip install -r requirements.txt &&
       python manage.py collectstatic --noinput &&
       python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='.fastembed_cache')"
+    # The admin account is created from DJANGO_SUPERUSER_* (set in the Render dashboard); it's skipped if they're
+    # empty or the account already exists.
     startCommand: >-
       python manage.py migrate --noinput &&
+      (python manage.py createsuperuser --noinput || true) &&
       gunicorn myproject.wsgi --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
@@ -29,6 +32,12 @@ services:
       - key: MONGODB_URI
         sync: false
       - key: GITHUB_TOKEN
+        sync: false
+      - key: DJANGO_SUPERUSER_USERNAME
+        sync: false
+      - key: DJANGO_SUPERUSER_EMAIL
+        sync: false
+      - key: DJANGO_SUPERUSER_PASSWORD
         sync: false
 
 databases:

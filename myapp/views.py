@@ -1,13 +1,16 @@
 import hashlib
+import ipaddress
 import json
 import logging
 import re
+import socket
 import threading
 import time
 import uuid
 from collections import deque
 from datetime import timedelta
-from urllib.parse import quote, urlsplit
+from html.parser import HTMLParser
+from urllib.parse import quote, unquote_plus, urljoin, urlsplit
 
 import requests
 from django import forms
@@ -217,7 +220,8 @@ class FontMatcher:
             if q is not None:
                 use_sims = self._similarity(q, uses)
                 mood_sims = self._similarity(q, mood)
-                score = 0.5 * self._similarity(q, [self._profile(f)])[0] + 0.35 * max(use_sims) + 0.15 * max(mood_sims)
+                # the single best-fitting job counts most; long profiles otherwise dilute specific matches
+                score = 0.3 * self._similarity(q, [self._profile(f)])[0] + 0.55 * max(use_sims) + 0.15 * max(mood_sims)
             else:  # keyword fallback: shared words with the phrases
                 use_sims = [len(words & _words(u)) for u in uses]
                 mood_sims = [len(words & _words(m)) for m in mood]
@@ -371,8 +375,12 @@ stats = RequestStats()
 
 
 def client_ip(request):
+    """The visitor's address. Behind Render's proxy, trust only the entry the proxy itself appended
+    (the last one); anything earlier in X-Forwarded-For can be forged by the client."""
     forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    return forwarded.split(",")[0].strip() if forwarded else request.META.get("REMOTE_ADDR", "")
+    if settings.BEHIND_PROXY and forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.META.get("REMOTE_ADDR", "")
 
 
 def ip_tag(request):
@@ -439,15 +447,554 @@ def read_json(request):
 # local embedding model as the font matcher. When nothing is close enough it
 # says so and offers to open a support ticket. Every exchange is logged to MongoDB.
 
-GREETING_RE = re.compile(r"^\W*(hi|hello|hey|hiya|yo|good (morning|afternoon|evening))\b[\W\w]{0,20}$", re.I)
-THANKS_RE = re.compile(r"^\W*(thanks|thank you|thx|cheers|ty|great|perfect|ok(ay)?)\b[\w\s!.]{0,30}$", re.I)
+GREETING_RE = re.compile(r"^\W*(hi|hello|hey|hiya|yo|hola|namaste|good (morning|afternoon|evening))"
+                         r"(\s+(there|all|everyone|team|assistant|bot|friend))?[\s!.,]*$", re.I)
+GREETING_PREFIX_RE = re.compile(r"^\W*(hi|hello|hey|hiya|yo|hola|namaste|good (morning|afternoon|evening))"
+                                r"(\s+(there|all|everyone|team|assistant|bot|friend))?[\s!.,:;-]+", re.I)
+THANKS_RE = re.compile(r"^\W*(thanks|thank you|thx|cheers|ty|great|perfect|ok(ay)?|cool|nice|awesome)"
+                       r"(\s+(so much|a lot|again|very much|for (the|your) help))?[\s!.]*$", re.I)
 ABOUT_RE = re.compile(r"\b(what can you do|who are you|what are you|help me|how can you help)\b", re.I)
 CODE_RE = re.compile(r"(?<![\w-])(os[\s-]?\d{3}|[1-5]\d\d)(?![\w-])", re.I)
 CODE_CONTEXT_RE = re.compile(r"\b(error|code|status|http|mean|means|meaning|got|getting|get|see|seeing|shows?)\b", re.I)
 
 ANSWER_AT = 0.80     # similarity for a confident answer
 MAYBE_AT = 0.745     # between this and ANSWER_AT: answer, but say it's a best guess
+FAQ_FIRST_AT = 0.86  # an FAQ this close beats the type advisor's intents
 MESSAGE_LIMIT = 500
+
+
+# ------------------------------------------------------------------ type advisor
+#
+# Font advice on top of the index: recommendations for a project, pairings,
+# comparisons, CSS snippets, and a typography review of any public website.
+
+URL_RE = re.compile(r"(https?://[^\s<>\"']+|\bwww\.[^\s<>\"']+|\b[a-z0-9][a-z0-9-]{0,62}(?:\.[a-z0-9-]{1,63})*\."
+                    r"(?:com|net|org|io|dev|app|in|co|ai|me|site|xyz|uk|us|edu|gov|info|biz|tech|store|blog|design|studio|"
+                    r"de|fr|ca|au|nl|es|it|jp|br|ch|se|no|dk|fi|pl|eu|nz|za|sg|pk|lk|np|ae|ie|be|at|pt|mx|online|space|"
+                    r"live|art|shop|agency|cloud|page|digital|media|world|life|news|website|tv|fm|gg|ly|so|to|cc)"
+                    r"\b(?:/[^\s<>\"']*)?)", re.I)
+RECOMMEND_RE = re.compile(r"\b(for|suggest|recommend|which|best|good|should i use|need|looking|pick|choose|ideas?|"
+                          r"options?|alternatives?)\b", re.I)
+FONT_WORD_RE = re.compile(r"\b(fonts?|typefaces?|type ?faces?|typography|lettering)\b", re.I)
+NOT_RECOMMEND_RE = re.compile(r"\b(sizes?|line[- ]?heights?|line length|spacing|load(ing)?|free|licen[cs]e|download|"
+                              r"cost|pay|variable|axes|tester|slider|account|password|caps|difference|serif or|"
+                              r"how many|matcher|picker|can i use|am i allowed|allowed|legal|permitted|commercial(ly)?|"
+                              r"sell|selling)\b", re.I)
+PAIR_RE = re.compile(r"\b(pair|pairs|pairing|goes? (well )?with|go together|match(es)? with|combine|combination|"
+                     r"partner|companion|alongside|body (font|text) for|heading (font )?for)\b", re.I)
+COMPARE_RE = re.compile(r"\b(vs\.?|versus|compare|comparison|difference|better|or)\b", re.I)
+CSS_RE = re.compile(r"\b(css|html|code|embed|import|install|link tag|add (it )?to|use (it )?(on|in)|snippet|"
+                    r"font-family|tailwind|react|next\.?js)\b", re.I)
+# Names that are also everyday words only count when written as a name (capitalised, not first word)
+AMBIGUOUS_NAMES = {"anybody", "outfit", "caveat", "unbounded", "inter", "syne", "rubik", "lexend", "oswald"}
+SENTENCE_START_WORDS = {"anybody", "outfit", "caveat"}
+FONT_CONTEXT_RE = re.compile(r"\b(vs\.?|versus|compare|pair|font|typeface|css|weight|about)\b", re.I)
+FAQ_ALWAYS_AT = 0.95  # an FAQ this close wins even over a recommendation request
+LEGAL_RE = re.compile(r"\b(allowed|legal|permitted|commercial(ly)?|licen[cs]e|sell|selling|free to use|copyright)\b", re.I)
+GENERIC_FAMILIES = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-sans-serif",
+                    "ui-serif", "ui-monospace", "-apple-system", "blinkmacsystemfont", "inherit", "initial", "unset",
+                    "emoji", "math", "fangsong", "ui-rounded"}
+FALLBACK_STACK = {"serif": "Georgia, serif", "sans": "system-ui, sans-serif", "mono": "ui-monospace, monospace",
+                  "display": "system-ui, sans-serif"}
+
+
+def css_family(face):
+    return f"'{face.name}', {FALLBACK_STACK.get(face.classification, 'sans-serif')}"
+
+
+def google_link(*faces):
+    return f'<link href="{fonts_url(faces)}" rel="stylesheet">'
+
+
+def find_url(text):
+    for m in URL_RE.finditer(text):
+        before = text[:m.start()]
+        if before.endswith("@") or re.search(r"[\w.+-]@$", before):  # the domain of an email address
+            continue
+        if re.search(r"[a-z]+://$", before, re.I):  # ftp://, file:// and other schemes we don't open
+            return None
+        url = m.group(1).rstrip(".,;:!?)]}'\"")
+        return url if url.lower().startswith(("http://", "https://")) else f"https://{url}"
+    return None
+
+
+ICON_FONT_RE = re.compile(r"icon|awesome|glyph|emoji|symbol|material|dashicons|icomoon|fontello", re.I)
+STYLE_SUFFIX_RE = re.compile(r"[\s_-]*(bold|regular|italic|light|medium|semibold|semi-bold|extrabold|black|thin|"
+                             r"heavy|book|roman|variable|vf|webfont)+$", re.I)
+
+
+def family_key(name):
+    """'SourceSansProBold' and 'Source Sans Pro' count as one family."""
+    return re.sub(r"[\s_-]", "", STYLE_SUFFIX_RE.sub("", name)).lower()
+
+
+def without_hedge(reason):
+    return reason.replace("That's a broad brief, so here's a versatile pick. ", "")
+
+
+class SiteFetchError(Exception):
+    pass
+
+
+class _PageParser(HTMLParser):
+    """Collects what a typography review needs from an HTML page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title, self.description, self.headings = "", "", []
+        self.stylesheets, self.styles, self.inline = [], [], []
+        self._in, self._buf = None, []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "link" and "stylesheet" in (a.get("rel") or "").lower() and a.get("href"):
+            self.stylesheets.append(a["href"])
+        elif tag == "meta" and (a.get("name") or a.get("property") or "").lower() in ("description", "og:description"):
+            self.description = self.description or (a.get("content") or "")[:300]
+        elif tag in ("title", "style", "h1", "h2"):
+            self._in, self._buf = tag, []
+        if a.get("style") and "font" in a["style"]:
+            self.inline.append(f"{tag} {{{a['style']}}}")
+
+    def handle_data(self, data):
+        if self._in:
+            self._buf.append(data)
+
+    def handle_endtag(self, tag):
+        if tag != self._in:
+            return
+        text = "".join(self._buf).strip()
+        if tag == "title":
+            self.title = self.title or text[:200]  # the page title, not a later <title> inside an SVG
+        elif tag == "style":
+            self.styles.append(text)
+        elif len(self.headings) < 6 and text:
+            self.headings.append(" ".join(text.split())[:120])
+        self._in = None
+
+
+def _check_public(url):
+    """Refuse anything that isn't a public http(s) address (no localhost, private networks or odd ports)."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise SiteFetchError("That isn't a web address I can open.")
+    if parts.port not in (None, 80, 443):
+        raise SiteFetchError("I only open sites on the standard web ports.")
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80),
+                                   proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError):
+        raise SiteFetchError(f"I couldn't find a site at {parts.hostname}. Check the address for typos.")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise SiteFetchError("That address points to a private network, so I can't open it.")
+
+
+def fetch_url(url, limit=1_500_000, accept="text/html", timeout=(3, 5)):
+    """GET a public URL with redirects checked hop by hop, a time limit and a size cap. Returns (final_url, text)."""
+    for _ in range(4):
+        _check_public(url)
+        r = requests.get(url, headers={"User-Agent": "OpenSpecimenTypeReview/1.0", "Accept": accept},
+                         timeout=timeout, allow_redirects=False, stream=True)
+        if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+            url = urljoin(url, r.headers.get("Location", ""))
+            r.close()
+            continue
+        if r.status_code >= 400:
+            raise SiteFetchError(f"The site answered with error {r.status_code}.")
+        body = b""
+        for chunk in r.iter_content(65536):
+            body += chunk
+            if len(body) > limit:
+                break
+        r.close()
+        return url, body.decode(r.encoding or "utf-8", errors="replace")
+    raise SiteFetchError("The site redirected too many times.")
+
+
+CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+CSS_VAR_RE = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,\s*([^)]+))?\)")
+
+
+def _px(value, base=16.0):
+    m = re.match(r"\s*([\d.]+)\s*(px|rem|em|pt|%)?", value or "")
+    if not m:
+        return None
+    n, unit = float(m.group(1)), (m.group(2) or "px")
+    return round({"px": n, "rem": n * 16, "em": n * base, "pt": n * 4 / 3, "%": n * base / 100}[unit], 1)
+
+
+def _line_height(value, size):
+    m = re.match(r"\s*([\d.]+)\s*(px|rem|em|%)?\s*$", value or "")
+    if not m:
+        return None
+    n, unit = float(m.group(1)), m.group(2)
+    if not unit or unit == "em":
+        return round(n, 2)
+    if unit == "%":
+        return round(n / 100, 2)
+    px = n * 16 if unit == "rem" else n
+    return round(px / size, 2) if size else None
+
+
+def analyse_css(css):
+    """Fonts, sizes and line heights a page sets for body text, headings and code."""
+    css = CSS_COMMENT_RE.sub("", css)
+    variables, rules, font_faces = {}, [], []
+    for selector, body in CSS_RULE_RE.findall(css):
+        selector = selector.strip().split("{")[-1].strip()
+        decls = {}
+        for d in body.split(";"):
+            if ":" in d:
+                k, v = d.split(":", 1)
+                decls[k.strip().lower()] = v.strip().replace("!important", "").strip()
+        if selector.lower().startswith("@font-face"):
+            fam = decls.get("font-family", "").strip("'\" ")
+            if fam:
+                font_faces.append((fam, "font-display" in decls))
+            continue
+        for k, v in decls.items():
+            if k.startswith("--"):
+                variables[k] = v
+        rules.append((selector.lower(), decls))
+
+    def resolve(v, depth=0):
+        if depth > 4:
+            return v
+        return CSS_VAR_RE.sub(lambda m: resolve(variables.get(m.group(1), m.group(2) or ""), depth + 1), v)
+
+    roles = {"body": {}, "heading": {}, "code": {}}
+    for selector, decls in rules:
+        sels = [s.strip() for s in selector.split(",")]
+        role = None
+        if any(s in ("html", "body", ":root", "p", "main", "article", "*") or s.endswith(" p") for s in sels):
+            role = "body"
+        elif any(re.fullmatch(r"(\.\w[\w-]* )?h[1-3]\b.*", s) or "title" in s or "heading" in s for s in sels):
+            role = "heading"
+        elif any(s in ("code", "pre", "kbd", "samp") or s.endswith(" code") for s in sels):
+            role = "code"
+        if not role:
+            continue
+        info = roles[role]
+        font = resolve(decls.get("font", ""))
+        if font:  # shorthand: [style] [weight] size[/line-height] family
+            m = re.search(r"([\d.]+(?:px|rem|em|pt|%))(?:\s*/\s*([\d.]+(?:px|rem|em|%)?))?\s+(.+)$", font)
+            if m:
+                info["size"], info["line"], info["family"] = m.group(1), m.group(2) or info.get("line"), m.group(3)
+        for prop, key in (("font-family", "family"), ("font-size", "size"), ("line-height", "line")):
+            if prop in decls:
+                info[key] = resolve(decls[prop])
+
+    def first_family(stack):
+        for f in (stack or "").split(","):
+            f = f.strip().strip("'\"").strip()
+            if (f and re.search(r"[a-z]", f, re.I) and f.lower() not in GENERIC_FAMILIES
+                    and not f.lower().startswith("var(") and not ICON_FONT_RE.search(f)):
+                return f
+        return None
+
+    families, seen = [], set()
+    for _, decls in rules:
+        fam = first_family(resolve(decls.get("font-family", "")))
+        if fam and family_key(fam) not in seen:
+            seen.add(family_key(fam))
+            families.append(fam)
+    result = {}
+    for role, info in roles.items():
+        size = _px(info.get("size")) if info.get("size") else None
+        result[role] = {"family": first_family(info.get("family")), "stack": info.get("family"), "size": size,
+                        "line": _line_height(info.get("line"), size or 16) if info.get("line") else None}
+    result["families"] = families
+    result["font_faces"] = [(f, has) for f, has in font_faces if not ICON_FONT_RE.search(f)]
+    return result
+
+
+class TypeAdvisor:
+    def faces(self):
+        return list(Typeface.objects.all())
+
+    def faces_in(self, text):
+        bare = text.strip(" ?!.").lower()
+        found = []
+        for f in self.faces():
+            if bare == f.name.lower():  # the whole message is a typeface name
+                return [f]
+            for m in re.finditer(rf"(?<![\w-]){re.escape(f.name)}(?![\w-])", text, re.I):
+                if f.name.lower() in AMBIGUOUS_NAMES and m.group(0) != f.name:
+                    continue  # "inter" or "outfit" written as an ordinary word
+                if f.name.lower() in SENTENCE_START_WORDS and m.start() == 0 and not FONT_CONTEXT_RE.search(text):
+                    continue  # "Anybody know…" at the start of a sentence
+                found.append((m.start(), f))
+                break
+        return [f for _, f in sorted(found, key=lambda x: x[0])]
+
+    # -- building blocks
+
+    def pair_for(self, face, faces=None):
+        """A partner with contrasting style: sans for serif/display/mono, serif for sans."""
+        faces = faces or self.faces()
+        if face.classification == "sans":
+            pool = [f for f in faces if f.classification == "serif"]
+        else:
+            pool = [f for f in faces if f.classification == "sans"]
+        pool = [f for f in pool if f.pk != face.pk] or [f for f in faces if f.pk != face.pk]
+        matcher._load()
+        if matcher._model is None:
+            return pool[0]
+        q = matcher._embed([f"{face.mood}. Used for {face.uses}"])[0]
+        return max(pool, key=lambda f: matcher._similarity(q, [f"{f.mood}. Used for {f.uses}"])[0])
+
+    READING_RE = re.compile(r"\b(articles?|reading|body|books?|ebooks?|blogs?|essays?|documentation|interfaces?|"
+                            r"apps?|reports?|papers?|news|websites?|dashboards?|forms|services|menus)\b", re.I)
+
+    def roles(self, face, faces=None):
+        """(heading, body, code) for a recommended face: display faces get a reading partner, mono goes to code."""
+        faces = faces or self.faces()
+        if face.classification == "mono":
+            partner = self.pair_for(face, faces)
+            return partner, partner, face
+        if face.classification == "display" or not self.READING_RE.search(face.uses):
+            return face, self.pair_for(face, faces), None
+        return face, face, None
+
+    @staticmethod
+    def _variation(settings_):
+        parts = [f'"{k}" {v}' for k, v in settings_.items() if k != "wght"]
+        css = []
+        if "wght" in settings_:
+            css.append(f"  font-weight: {settings_['wght']};")
+        if parts:
+            css.append(f"  font-variation-settings: {', '.join(parts)};")
+        return css
+
+    def css_snippet(self, heading, body=None, heading_settings=None, code=None):
+        body = body or heading
+        lines = [google_link(*dict.fromkeys(f for f in (heading, body, code) if f)), "", "<style>",
+                 f"  body {{ font-family: {css_family(body)}; font-size: 1.0625rem; line-height: 1.55; }}"]
+        h = [f"  h1, h2, h3 {{ font-family: {css_family(heading)}; line-height: 1.1;"]
+        h += [" " + c.strip() for c in self._variation(heading_settings or {})]
+        lines.append("".join(h) + " }")
+        if code:
+            lines.append(f"  code, pre {{ font-family: {css_family(code)}; }}")
+        lines.append("</style>")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _uses(face, n=3):
+        return ", ".join(_phrases(face.uses)[:n])
+
+    # -- intents
+
+    def about(self, face):
+        axes = ", ".join(f"{a['name'].lower()} {a['min']}–{a['max']}" for a in face.axes) or "a single static style"
+        text = (f"{face.name} is a {face.get_classification_display().lower()} typeface by {face.designer} ({face.year}). "
+                f"{face.description} It's good for {self._uses(face)}, and it feels {', '.join(_phrases(face.mood)[:3])}. "
+                f"Variable axes: {axes}.")
+        return {"kind": "typeface", "text": text, "matched": face.name,
+                "source": {"title": f"Try {face.name} in the tester", "url": face.get_absolute_url()},
+                "related": [f"What pairs with {face.name}?", f"How do I use {face.name} in CSS?"]}
+
+    def pairing(self, face):
+        partner = self.pair_for(face)
+        heading, body = (face, partner) if face.classification in ("display", "serif") else (partner, face)
+        if face.classification == "mono":
+            heading, body = partner, face
+        text = (f"Pair {face.name} with {partner.name}. Use {heading.name} for headings and {body.name} for body text. "
+                f"{partner.name} contrasts in style ({partner.get_classification_display().lower()} against "
+                f"{face.get_classification_display().lower()}) but shares a {_phrases(partner.mood)[0]} tone, so the two "
+                f"feel related without competing.")
+        return {"kind": "pairing", "text": text, "matched": f"{face.name} + {partner.name}",
+                "code": self.css_snippet(heading, body),
+                "source": {"title": f"See {partner.name}", "url": partner.get_absolute_url()}}
+
+    def compare(self, a, b):
+        def line(f):
+            return (f"{f.name} ({f.get_classification_display().lower()}, {f.designer}, {f.year}) feels "
+                    f"{', '.join(_phrases(f.mood)[:3])} and suits {self._uses(f, 2)}.")
+        axes_a, axes_b = len(a.axes), len(b.axes)
+        flexible = a if axes_a > axes_b else b if axes_b > axes_a else None
+        text = f"{line(a)} {line(b)} Choose {a.name} for {_phrases(a.uses)[0]}; choose {b.name} for {_phrases(b.uses)[0]}."
+        if flexible:
+            text += f" {flexible.name} has more variable axes, so it's the more flexible of the two."
+        return {"kind": "compare", "text": text, "matched": f"{a.name} vs {b.name}",
+                "source": {"title": f"Open {a.name}", "url": a.get_absolute_url()},
+                "related": [f"Tell me about {b.name}", f"What pairs with {a.name}?"]}
+
+    def css(self, face):
+        settings_ = {a["tag"]: a["default"] for a in face.axes}
+        text = (f"Add the link tag to your page's <head>, then set the font-family. {face.name} is a variable font, so "
+                f"you can use any weight in its range." if face.axes else
+                f"Add the link tag to your page's <head>, then set the font-family. {face.name} comes in fixed styles.")
+        code = "\n".join([google_link(face), "", "<style>", "  body {", f"    font-family: {css_family(face)};",
+                          *["  " + c for c in self._variation(settings_)], "  }", "</style>"])
+        return {"kind": "css", "text": text, "code": code, "matched": face.name,
+                "source": {"title": f"{face.name} on Google Fonts", "url": face.google_url}}
+
+    @staticmethod
+    def brief(text):
+        """The subject of a font question: 'which font should I use for a yoga studio website?' → 'yoga studio'."""
+        t = re.sub(r"[?!.]+$", "", text.strip())
+        m = re.search(r"\b(?:fonts?|typefaces?|type ?faces?|typography)\b.*?\bfor\b\s+(.*)$", t, re.I)
+        subject = m.group(1) if m else FONT_WORD_RE.sub("", t)
+        subject = re.sub(r"^(?:(?:a|an|the|my|our|your|some)\s+)+", "", subject.strip(), flags=re.I)
+        subject = re.sub(r"\s+(?:website|site|web ?page|homepage)$", "", subject, flags=re.I)
+        subject = re.sub(r"^(?:which|what|best|good|suggest|recommend|need|looking for|pick|choose)\b\s*", "",
+                         subject, flags=re.I)
+        return subject.strip() if len(subject.strip()) >= 3 else text
+
+    def recommend(self, text):
+        faces = self.faces()
+        result = matcher.match(self.brief(text), faces)
+        face = result["face"]
+        heading, body, code = self.roles(face, faces)
+        reason = without_hedge(result["reason"])
+        lead = ("That's a broad brief, so here's a versatile pick: " if reason != result["reason"] else "Try ")
+        if code:
+            note = (f" Use it for code blocks, and {heading.name} for headings and body text, because long "
+                    f"paragraphs in a monospace are tiring to read.")
+        elif body.pk != heading.pk:
+            note = f" Use it for headings, and pair it with {body.name} for body text, which stays easy to read in paragraphs."
+        else:
+            note = " It works for both headings and body text; use a heavier weight for headings."
+        answer = f"{lead}{face.name}. {reason}{note}"
+        if result["runner_up"]:
+            answer += f" Also worth a look: {result['runner_up'].name}."
+        m = Match(typeface=face, query=text[:200], settings=result["settings"], size=result["size"])
+        return {"kind": "recommend", "text": answer, "matched": face.name,
+                "code": self.css_snippet(heading, body, result["settings"] if heading.pk == face.pk else None, code),
+                "source": {"title": f"Open {face.name} with these settings", "url": m.tester_url},
+                "related": [f"What pairs with {face.name}?", f"Tell me about {face.name}"]}
+
+    # -- website review
+
+    def audit(self, url):
+        started = time.monotonic()
+        try:
+            final, html = fetch_url(url)
+        except SiteFetchError as exc:
+            return {"kind": "site_error", "text": f"I couldn't review {urlsplit(url).hostname or url}: {exc}"}
+        except requests.Timeout:
+            return {"kind": "site_error", "text": f"{urlsplit(url).hostname} took too long to answer, so I stopped "
+                    "after 5 seconds. Try again, or try the homepage address."}
+        except requests.RequestException:
+            return {"kind": "site_error", "text": f"I couldn't connect to {urlsplit(url).hostname}. Check the "
+                    "address, or make sure the site is public."}
+        host = urlsplit(final).hostname or url
+        page = _PageParser()
+        try:
+            page.feed(html)
+        except Exception:
+            pass
+        css_parts = list(page.styles) + page.inline
+        google_families = []
+        for href in page.stylesheets[:8]:
+            full = urljoin(final, href)
+            if "fonts.googleapis.com" in full:
+                google_families += [unquote_plus(f).split(":")[0] for f in re.findall(r"family=([^&]+)", full)]
+                continue
+            if len([p for p in css_parts if p]) > 12 or time.monotonic() - started > 4:
+                break  # keep the whole review within a few seconds
+            try:
+                css_parts.append(fetch_url(full, limit=600_000, accept="text/css", timeout=(2, 2.5))[1])
+            except (SiteFetchError, requests.RequestException):
+                continue
+        css = analyse_css("\n".join(css_parts))
+        families = list(dict.fromkeys(google_families + css["families"]))
+        body_now, head_now = css["body"]["family"], css["heading"]["family"] or css["body"]["family"]
+
+        purpose = " ".join(filter(None, [page.title, page.description, *page.headings[:3]])) or host
+        faces = self.faces()
+        result = matcher.match(purpose, faces)
+        face = result["face"]
+        heading, body, code = self.roles(face, faces)
+        reason = without_hedge(result["reason"]) if heading.pk == face.pk else (
+            f"It suits {_phrases(heading.uses)[0]} and feels {', '.join(_phrases(heading.mood)[:2])}.")
+
+        items = []
+        if head_now and family_key(head_now) == family_key(heading.name):
+            items.append({"where": "Headings", "change": f"Keep {head_now}.",
+                          "why": f"It already fits a site about {(page.title or host)[:60]}."})
+        else:
+            items.append({"where": "Headings (h1, h2, h3)",
+                          "change": f"Switch from {head_now or 'the browser default font'} to {heading.name}.",
+                          "why": reason})
+        if not (body_now and family_key(body_now) == family_key(body.name)):
+            items.append({"where": "Body text (body, p)",
+                          "change": f"Use {body.name}" + (f" instead of {body_now}." if body_now else "."),
+                          "why": f"{body.name} is built for {_phrases(body.uses)[0]} and stays readable in long paragraphs."})
+        code_now = css["code"]["family"]
+        if code and not (code_now and family_key(code_now) == family_key(code.name)):
+            items.append({"where": "Code (code, pre)", "change": f"Use {code.name}" + (f" instead of {code_now}." if code_now else "."),
+                          "why": f"{code.name} is a monospace made for {_phrases(code.uses)[0]}."})
+        size = css["body"]["size"]
+        if size and size < 16:
+            items.append({"where": "Body font-size", "change": f"Raise it from {size:g}px to 17px (1.0625rem).",
+                          "why": "Text under 16px is tiring to read and makes phones zoom into form fields."})
+        line = css["body"]["line"]
+        if line and line < 1.4:
+            items.append({"where": "Body line-height", "change": f"Increase it from {line:g} to 1.5–1.6.",
+                          "why": "Tight lines make the eye lose its place when jumping to the next line."})
+        elif line and line > 1.9:
+            items.append({"where": "Body line-height", "change": f"Reduce it from {line:g} to about 1.6.",
+                          "why": "Very loose lines break paragraphs into separate strips."})
+        if len(families) > 3:
+            items.append({"where": "Whole site", "change": f"Cut down from {len(families)} font families "
+                          f"({', '.join(families[:5])}) to two.",
+                          "why": "Each family adds download weight, and too many styles make a page look unplanned."})
+        missing_display = [f for f, has in css["font_faces"] if not has]
+        if missing_display:
+            items.append({"where": "@font-face rules", "change": f"Add font-display: swap to {missing_display[0]}.",
+                          "why": "Without it, text can stay invisible while the font downloads."})
+        if any(f.lower() in ("comic sans ms", "papyrus", "impact") for f in families):
+            items.append({"where": "Whole site", "change": "Replace Comic Sans, Papyrus or Impact.",
+                          "why": "They read as unprofessional to most visitors."})
+        found = (f"It uses {', '.join(families[:4])}." if families else
+                 "I couldn't see any web fonts in its HTML or CSS, so it's likely using the browser's default font "
+                 "(or loading fonts with JavaScript).")
+        what = page.title or host
+        text = (f"I reviewed {host} ({what[:80]}). {found} Body text is "
+                f"{f'{size:g}px' if size else 'at the browser default size'}"
+                f"{f' with a line height of {line:g}' if line else ''}. Here's what I'd change:")
+        m = Match(typeface=heading, query=(page.title or host)[:200], settings=result["settings"] if heading.pk == face.pk else {},
+                  size=result["size"])
+        return {"kind": "site_audit", "text": text, "items": items, "matched": host,
+                "code": self.css_snippet(heading, body, result["settings"] if heading.pk == face.pk else None, code),
+                "source": {"title": f"Preview {heading.name} with your title", "url": m.tester_url}}
+
+    def answer(self, text, faq_score):
+        """A type-advice reply, or None when the question is for the FAQ."""
+        url = find_url(text)
+        if url:
+            return self.audit(url)
+        mentioned = self.faces_in(text)
+        if len(mentioned) >= 2 and COMPARE_RE.search(text) and not PAIR_RE.search(text):
+            return self.compare(mentioned[0], mentioned[1])
+        if mentioned:
+            face = mentioned[0]
+            if LEGAL_RE.search(text):  # "can I use Inter commercially?"
+                faq = Faq.objects.filter(question="Are the fonts free to use?").first()
+                return {"kind": "faq", "matched": faq.question if faq else face.name,
+                        "text": f"Yes. {face.name} is licensed under the SIL Open Font License, so you can use it for "
+                                f"free in personal and commercial work, including logos, websites, apps and printed "
+                                f"products you sell. The one thing you can't do is sell the font files themselves.",
+                        "source": {"title": faq.question, "url": faq.get_absolute_url()} if faq else None}
+            if PAIR_RE.search(text):
+                return self.pairing(face)
+            if CSS_RE.search(text):
+                return self.css(face)
+            if faq_score >= FAQ_FIRST_AT:
+                return None
+            return self.about(face)
+        wants_font = FONT_WORD_RE.search(text) and not NOT_RECOMMEND_RE.search(text) and (
+            RECOMMEND_RE.search(text) or (PAIR_RE.search(text) and re.search(r"\bfor\b", text, re.I)))
+        if wants_font and faq_score < FAQ_ALWAYS_AT:
+            return self.recommend(text)
+        return None
+
+
+type_advisor = TypeAdvisor()
 
 
 class Assistant:
@@ -472,18 +1019,34 @@ class Assistant:
                 "matched": code.code}
 
     def reply(self, message):
-        text = message.strip()
-        if GREETING_RE.match(text) and len(text) < 30:
-            return {"kind": "greeting", "text": "Hi! Ask me about the typefaces, licensing, your account, or any "
-                    "error code you've seen on this site."}
-        if THANKS_RE.match(text) and len(text) < 40:
+        text = " ".join(message.split())  # collapse newlines and runs of spaces
+        if not re.search(r"\w", text):
+            return {"kind": "empty", "text": "Type a question in words, like 'Which font suits a bakery website?' "
+                    "or paste your site's address for a typography review."}
+        if GREETING_RE.match(text):
+            return {"kind": "greeting", "text": "Hi! I can recommend typefaces, suggest pairings, review your "
+                    "website's fonts if you paste its address, and answer questions about this site or any error code."}
+        if THANKS_RE.match(text):
             return {"kind": "thanks", "text": "Glad that helped. Anything else?"}
+        text = GREETING_PREFIX_RE.sub("", text) or text  # "hi, which font…" → "which font…"
+        letters = re.findall(r"[^\W\d_]", text)
+        if letters and sum(c.isascii() for c in letters) / len(letters) < 0.5 and not find_url(text):
+            return {"kind": "language", "offer_ticket": True,
+                    "text": "I can only answer in English for now. Ask again in English, or open a support ticket "
+                            "and a person will reply."}
         if ABOUT_RE.search(text):
-            return {"kind": "about", "text": "I answer questions from the FAQ and explain the error codes this site "
-                    "can show, like 404 or 429. If I can't answer, I'll open a support ticket so a person replies "
-                    "by email.", "related": [f.question for f in Faq.objects.all()[:3]]}
+            return {"kind": "about", "text": "I can recommend typefaces for your project, suggest font pairings, "
+                    "compare fonts, give you the CSS to use them, and review the typography of your own website if "
+                    "you paste its address. I also answer questions from the FAQ and explain error codes like 404. "
+                    "If I can't answer, I'll open a support ticket so a person replies by email.",
+                    "related": ["Which font should I use for a bakery website?", "What pairs with Fraunces?",
+                                "Review https://example.com"]}
 
-        # 1. An error code, when the message is about one ("what does 429 mean", "error OS-422", "403?")
+        # 1. A website to review ("check https://mysite.com", "suggest fonts for mysite.in")
+        if find_url(text):
+            return type_advisor.answer(text, 0.0)
+
+        # 2. An error code, when the message is about one ("what does 429 mean", "error OS-422", "403?")
         code_match = CODE_RE.search(text)
         if code_match and (CODE_CONTEXT_RE.search(text) or len(text.split()) <= 3):
             raw = code_match.group(1).upper().replace(" ", "-")
@@ -496,7 +1059,7 @@ class Assistant:
                     f"are {known}. Tell me which one you saw and I'll explain it.",
                     "source": {"title": "All error codes", "url": reverse("myapp:errors")}}
 
-        # 2. The closest FAQ or error explanation
+        # 3. The closest FAQ or error explanation, unless it's a question for the type advisor
         docs = self._docs()
         matcher._load()
         if matcher._model is not None:
@@ -508,6 +1071,9 @@ class Assistant:
                       for kind, obj, texts in docs]
         scored.sort(key=lambda s: s[0], reverse=True)
         score, kind, obj = scored[0]
+        advice = type_advisor.answer(text, score)
+        if advice:
+            return advice
         related = [o.question for _, k, o in scored[1:6] if k == "faq" and o is not obj][:2]
 
         if score >= MAYBE_AT:
@@ -554,7 +1120,15 @@ def chat(request):
 
     started = time.perf_counter()
     message = form.cleaned_data["message"]
-    answer = assistant.reply(message)
+    if find_url(message) and rate_limited(request, "audit", limit=6, seconds=60):
+        return api_error(429, "You've asked for several website reviews in a minute. Wait a moment and try again.")
+    try:
+        answer = assistant.reply(message)
+    except Exception:  # never leave the visitor without an answer
+        log.exception("Assistant failed on %r", message[:200])
+        answer = {"kind": "no_answer", "offer_ticket": True,
+                  "text": "Something went wrong while I was answering. I can open a support ticket so a person "
+                          "replies to you by email."}
     ms = round((time.perf_counter() - started) * 1000, 1)
     user = request.user if request.user.is_authenticated else None
     log_id = documents.insert("chat_logs", {
@@ -562,6 +1136,7 @@ def chat(request):
         "user": user.get_username() if user else None,
         "message": message,
         "reply": answer["text"],
+        "advice": answer.get("items"),
         "kind": answer["kind"],
         "matched": answer.get("matched"),
         "score": answer.get("score"),
@@ -928,6 +1503,62 @@ def submit(request):
         messages.success(request, f"Thanks — we'll review {s.typeface} and reply to {s.email}.")
         return redirect("myapp:submit")
     return render(request, "myapp/submit.html", {"form": form})
+
+
+def staff_only(view):
+    """Logged-out visitors go to the log-in page; logged-in non-staff get the 403 page."""
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.get_full_path())
+        if not request.user.is_staff:
+            return permission_denied(request)
+        return view(request, *args, **kwargs)
+    wrapped.__name__ = view.__name__
+    return wrapped
+
+
+@staff_only
+def staff_dashboard(request):
+    status = request.GET.get("status", "open")
+    tickets = SupportTicket.objects.select_related("user")
+    if status in SupportTicket.Status.values:
+        tickets = tickets.filter(status=status)
+    logs = documents.find("chat_logs", limit=500)
+    feedback = documents.find("feedback", limit=500)
+    helpful = sum(1 for f in feedback if f.get("helpful"))
+    kinds = {}
+    for entry in logs:
+        kinds[entry.get("kind") or "other"] = kinds.get(entry.get("kind") or "other", 0) + 1
+    since = timezone.now() - timedelta(days=1)
+    return render(request, "myapp/staff.html", {
+        "stats": [
+            ("Accounts", User.objects.count()),
+            ("Open tickets", SupportTicket.objects.filter(status=SupportTicket.Status.OPEN).count()),
+            ("Chat messages (last 500)", len([e for e in logs if e.get("message")])),
+            ("Helpful answers", f"{round(100 * helpful / len(feedback))}%" if feedback else "—"),
+            ("Matches today", Match.objects.filter(created__gte=since).count()),
+            ("Submissions", Submission.objects.count()),
+        ],
+        "tickets": tickets[:50],
+        "status": status,
+        "statuses": SupportTicket.Status.choices,
+        "unanswered": [e for e in logs if e.get("kind") == "no_answer"][:15],
+        "recent": [e for e in logs if e.get("message")][:25],
+        "kinds": sorted(kinds.items(), key=lambda kv: kv[1], reverse=True),
+        "mongo": documents.ping(),
+    })
+
+
+@staff_only
+@require_POST
+def staff_ticket(request, pk):
+    t = get_object_or_404(SupportTicket, pk=pk)
+    new = request.POST.get("status")
+    if new in SupportTicket.Status.values:
+        t.status = new
+        t.save(update_fields=["status"])
+        messages.success(request, f"{t.reference} marked {t.get_status_display().lower()}.")
+    return redirect(f"{reverse('myapp:staff')}?status={request.POST.get('back', 'open')}")
 
 
 def faq(request):

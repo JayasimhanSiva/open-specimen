@@ -14,6 +14,8 @@ urlpatterns = [
     path("submit/", views.submit, name="submit"),
     path("health/", views.health, name="health"),
     path("health.json", views.health, name="health_json"),
+    path("staff/", views.staff_dashboard, name="staff"),
+    path("staff/tickets/<int:pk>/", views.staff_ticket, name="staff_ticket"),
     # accounts
     path("signup/", views.signup, name="signup"),
     path("login/", views.LoginView.as_view(), name="login"),
