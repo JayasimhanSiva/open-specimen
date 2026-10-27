@@ -1,0 +1,38 @@
+{% extends "myapp/base.html" %}
+{% block title %}Submit a typeface — Open Specimen{% endblock %}
+{% block content %}
+<section class="wrap grid submit">
+  <p class="label mono">Submit</p>
+  <h1 class="submit__title">Suggest a typeface for the index.</h1>
+
+  <div class="submit__form">
+    {% for m in messages %}<p class="notice" role="status">{{ m }}</p>{% endfor %}
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% for field in form %}
+      <div class="field{% if field.field.widget.input_type == 'checkbox' %} field--check{% endif %}{% if field.errors %} field--error{% endif %}">
+        {% if field.field.widget.input_type == 'checkbox' %}
+          {{ field }}<label for="{{ field.id_for_label }}">{{ field.label|capfirst }}</label>
+        {% else %}
+          <label for="{{ field.id_for_label }}">{{ field.label|capfirst }}{% if not field.field.required %} <span class="opt">optional</span>{% endif %}</label>
+          {{ field }}
+        {% endif %}
+        {% if field.errors %}<p class="field__error" id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</p>{% endif %}
+      </div>
+      {% endfor %}
+      <button class="button" type="submit">Send submission <span aria-hidden="true">→</span></button>
+    </form>
+  </div>
+
+  <aside class="submit__aside" aria-labelledby="criteria-h">
+    <h2 id="criteria-h" class="mono criteria__h">What we look for</h2>
+    <ul class="criteria">
+      <li>Licensed under the SIL Open Font License</li>
+      <li>A complete Latin character set</li>
+      <li>Variable axes, or a reason it doesn't need them</li>
+      <li>Something the index doesn't already have</li>
+    </ul>
+    <p class="criteria__note">We read every submission and reply within two weeks.</p>
+  </aside>
+</section>
+{% endblock %}

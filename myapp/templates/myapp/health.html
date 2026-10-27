@@ -1,0 +1,33 @@
+{% extends "myapp/base.html" %}
+{% block title %}Site health — Open Specimen{% endblock %}
+{% block content %}
+<section class="wrap grid page-intro">
+  <p class="label mono">Health</p>
+  <h1 class="page-intro__title">
+    {% if status == "ok" %}Everything is working.{% elif status == "degraded" %}Running, with a part degraded.{% else %}The site is having trouble.{% endif %}
+  </h1>
+  <p class="page-intro__lede">Checked just now, {{ now|date:"j M Y, H:i" }} UTC. The same data is at <a href="{% url 'myapp:health_json' %}">/health.json</a> for uptime monitors.</p>
+</section>
+
+<section class="wrap" aria-label="Checks">
+  <ol class="checks">
+    {% for c in checks %}
+    <li class="grid check check--{{ c.status|slugify }}">
+      <span class="check__name">{{ c.name }}</span>
+      <span class="check__status mono"><i aria-hidden="true"></i>{{ c.status }}</span>
+      <span class="check__detail">{{ c.detail }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="wrap grid health-facts" aria-label="Server">
+  <p class="label mono">Server</p>
+  <dl class="facts health-facts__list">
+    <div class="h1f"><dt class="mono">Version</dt><dd>{{ version }}</dd></div>
+    <div class="h2f"><dt class="mono">Up for</dt><dd>{{ uptime }}</dd></div>
+    <div class="h3f"><dt class="mono">Requests</dt><dd>{{ requests.total }} ({{ requests.4xx }} 4xx, {{ requests.5xx }} 5xx)</dd></div>
+    <div class="h4f"><dt class="mono">Avg time</dt><dd>{{ requests.avg_ms_last_200 }} ms</dd></div>
+  </dl>
+</section>
+{% endblock %}

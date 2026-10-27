@@ -1,0 +1,6 @@
+{
+  "files.associations": { "**/templates/**/*.html": "django-html" },
+  "emmet.includeLanguages": { "django-html": "html" },
+  "editor.formatOnSave": false,
+  "files.exclude": { "**/__pycache__": true }
+}

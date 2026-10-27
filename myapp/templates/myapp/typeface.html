@@ -1,0 +1,75 @@
+{% extends "myapp/base.html" %}
+{% block title %}{{ face.name }} — Open Specimen{% endblock %}
+{% block description %}{{ face.description|truncatechars:150 }}{% endblock %}
+{% block content %}
+<article class="specimen" style="--face: '{{ face.name }}'">
+  <header class="wrap grid specimen__head">
+    <a class="label mono back" href="{% url 'myapp:home' %}#index">← Index</a>
+    <h1 class="specimen__name">{{ face.name }}</h1>
+    <dl class="facts">
+      <div class="f1"><dt class="mono">Designer</dt><dd>{{ face.designer }}</dd></div>
+      <div class="f2"><dt class="mono">Year</dt><dd>{{ face.year }}</dd></div>
+      <div class="f3"><dt class="mono">Class</dt><dd>{{ face.get_classification_display }}</dd></div>
+      <div class="f4"><dt class="mono">Axes</dt><dd>{{ face.axis_tags }}</dd></div>
+    </dl>
+  </header>
+
+  <section class="wrap grid block" aria-labelledby="about-h">
+    <h2 id="about-h" class="label mono">About</h2>
+    <p class="about__text">{{ face.description }}</p>
+    <a class="button about__button" href="{{ face.google_url }}" target="_blank" rel="noopener">Open on Google Fonts <span aria-hidden="true">↗</span></a>
+    <p class="history mono" data-history="{% url 'myapp:typeface_history' face.slug %}" aria-live="polite">
+      <span class="history__label">Last change in Google Fonts</span>
+      <span class="history__value" data-history-value>Checking GitHub…</span>
+    </p>
+  </section>
+
+  <section class="wrap grid block" aria-labelledby="tester-h">
+    <h2 id="tester-h" class="label mono">Tester</h2>
+    <div class="tester">
+      <div class="controls" role="group" aria-label="Type settings">
+        <label class="control">
+          <span class="control__top mono"><span>Size</span><output data-out="size">72 px</output></span>
+          <input type="range" min="12" max="200" value="72" data-size>
+        </label>
+        {% for a in face.axes_ui %}
+        <label class="control">
+          <span class="control__top mono"><span>{{ a.name }}</span><output data-out="{{ a.tag }}">{{ a.default }}</output></span>
+          <input type="range" min="{{ a.min }}" max="{{ a.max }}" value="{{ a.default }}" step="{{ a.step }}" data-axis="{{ a.tag }}">
+        </label>
+        {% endfor %}
+        <button class="button button--ghost control__reset" type="button" data-reset>Reset</button>
+      </div>
+      <p class="tester__text" contenteditable="plaintext-only" spellcheck="false" aria-label="Editable sample text">{{ face.sample }}</p>
+    </div>
+  </section>
+
+  <section class="wrap block" aria-labelledby="waterfall-h">
+    <ol class="waterfall">
+      {% for size in waterfall %}
+      <li class="grid">
+        {% if forloop.first %}<h2 id="waterfall-h" class="label mono">Waterfall</h2>{% endif %}
+        <span class="waterfall__line" style="font-size: {{ size }}px">{{ face.sample }}</span>
+        <span class="waterfall__size mono">{{ size }} px</span>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section class="wrap grid block" aria-labelledby="glyphs-h">
+    <h2 id="glyphs-h" class="label mono">Glyphs</h2>
+    <ul class="glyphs" aria-label="Character set">
+      {% for g in glyphs %}<li><button type="button" data-glyph="{{ g }}">{{ g }}</button></li>{% endfor %}
+    </ul>
+    <figure class="glyph-view" aria-live="polite">
+      <span class="glyph-view__char" data-glyph-view>A</span>
+      <figcaption class="glyph-view__cap mono"><span data-glyph-name>A</span><span data-glyph-code>U+0041</span></figcaption>
+    </figure>
+  </section>
+</article>
+
+<a class="wrap grid next" href="{{ next.get_absolute_url }}" style="--face: '{{ next.name }}'">
+  <span class="label mono">Next</span>
+  <span class="next__name">{{ next.name }} <span aria-hidden="true">→</span></span>
+</a>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "myapp/base.html" %}
+{% block title %}Sign up — Open Specimen{% endblock %}
+{% block content %}
+<section class="wrap grid submit auth">
+  <p class="label mono">Sign up</p>
+  <h1 class="submit__title">Create your account.</h1>
+
+  <div class="submit__form">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<p class="field__error form-error" role="alert">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+      {% for field in form %}{% include "myapp/_field.html" %}{% endfor %}
+      <button class="button" type="submit">Create account <span aria-hidden="true">→</span></button>
+    </form>
+  </div>
+
+  <aside class="submit__aside">
+    <h2 class="mono criteria__h">Already have one?</h2>
+    <p class="criteria__note criteria__note--top">Log in with your username and password.</p>
+    <a class="button button--ghost auth__switch" href="{% url 'myapp:login' %}">Log in</a>
+  </aside>
+</section>
+{% endblock %}

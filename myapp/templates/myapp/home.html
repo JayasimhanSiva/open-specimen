@@ -1,0 +1,129 @@
+{% extends "myapp/base.html" %}
+{% block content %}
+<section class="hero" aria-labelledby="hero-word">
+  <div class="wrap grid hero__meta mono">
+    <p class="m1">{{ total }} families</p>
+    <p class="m2">All SIL Open Font License</p>
+    <p class="m3">Free for commercial work</p>
+    <p class="m4"><span class="hint-pointer">Move across the word</span><span class="hint-touch">Drag across the word</span></p>
+  </div>
+
+  <div class="wrap">
+    <h1 class="hero__word" id="hero-word" aria-label="Specimen">
+      {% for ch in "Specimen" %}<span aria-hidden="true">{{ ch }}</span>{% endfor %}
+    </h1>
+  </div>
+
+  <div class="wrap grid hero__foot">
+    <p class="hero__lede">Ten typefaces you can use in anything you make, for free. Each one is set in itself, with its variable axes live.</p>
+    <p class="hero__readout mono" aria-live="off"><span>Anybody</span><span data-readout>wdth 100 · wght 400</span></p>
+  </div>
+</section>
+
+<section class="matcher" id="match" aria-labelledby="match-h">
+  <div class="wrap grid matcher__head">
+    <h2 id="match-h" class="label mono">Match</h2>
+    <p class="matcher__title">Describe what you're making. We'll pick the typeface and set it for you.</p>
+  </div>
+
+  {% if not user.is_authenticated %}
+  <div class="wrap grid matcher__guest">
+    <p class="matcher__guest-text">The matcher is free with an account. It keeps your recent matches so you can come back to them.</p>
+    <div class="matcher__guest-actions">
+      <a class="button" href="{% url 'myapp:signup' %}">Sign up <span aria-hidden="true">→</span></a>
+      <a class="button button--ghost" href="{% url 'myapp:login' %}?next=/%23match">Log in</a>
+    </div>
+  </div>
+  {% else %}
+  <form class="wrap grid matcher__form" method="post" action="{% url 'myapp:match' %}" data-matcher novalidate>
+    {% csrf_token %}
+    <label class="visually-hidden" for="match-q">What are you setting, and how should it feel?</label>
+    <input class="matcher__input" id="match-q" name="q" type="text" maxlength="200" autocomplete="off"
+           placeholder="e.g. {{ examples.0 }}" aria-describedby="match-error">
+    <button class="button matcher__go" type="submit">Find a typeface <span aria-hidden="true">→</span></button>
+    <div class="matcher__examples">
+      <span class="mono">Try</span>
+      {% for e in examples %}<button class="chip" type="button" data-example="{{ e }}">{{ e }}</button>{% endfor %}
+    </div>
+    <p class="matcher__error" id="match-error" role="alert"{% if not messages %} hidden{% endif %}>{% for m in messages %}{{ m }}{% endfor %}</p>
+  </form>
+
+  <div class="wrap grid result" data-result aria-live="polite"{% if not current %} hidden{% endif %}>
+    <p class="label mono">Result</p>
+    <p class="result__sample" data-r="sample"
+       {% if current %}style="font-family: '{{ current.typeface.name }}'; font-variation-settings: {{ current.variation_css }}; --size: {{ current.size }}px"{% endif %}>{{ current.query }}</p>
+    <dl class="result__facts">
+      <div class="rf1"><dt class="mono">Typeface</dt><dd><a data-r="face" href="{{ current.typeface.get_absolute_url }}">{{ current.typeface.name }}</a></dd></div>
+      <div class="rf2"><dt class="mono">Settings</dt><dd class="mono" data-r="settings">{{ current.settings_label }}</dd></div>
+      <div class="rf3"><dt class="mono">Matched in</dt><dd class="mono" data-r="ms">—</dd></div>
+    </dl>
+    <p class="result__reason" data-r="reason">{{ current.reason }}</p>
+    <div class="result__actions">
+      <a class="button" data-r="tester" href="{{ current.tester_url }}">Open in the tester <span aria-hidden="true">→</span></a>
+      <a class="result__alt" data-r="alt" href="#"{% if not current %} hidden{% endif %}></a>
+    </div>
+  </div>
+
+  <div class="wrap grid recent" data-recent-wrap{% if not recent %} hidden{% endif %}>
+    <h3 class="label mono">Your recent matches</h3>
+    <ol class="recent__list" data-recent>
+      {% for m in recent %}
+      <li><a class="recent__row" href="{{ m.tester_url }}">
+        <span class="recent__q">{{ m.query }}</span>
+        <span class="recent__face" style="font-family: '{{ m.typeface.name }}'">{{ m.typeface.name }}</span>
+        <span class="recent__go mono" aria-hidden="true">→</span>
+      </a></li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+</section>
+
+<section class="index" id="index" aria-labelledby="index-h">
+  <div class="wrap grid index__head">
+    <h2 id="index-h" class="label mono">Index</h2>
+    <nav class="filters" aria-label="Filter by classification">
+      <a href="?#index"{% if not active %} aria-current="true"{% endif %}>All <sup>{{ total }}</sup></a>
+      {% for value, label in classes %}
+      <a href="?class={{ value }}#index"{% if active == value %} aria-current="true"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <div class="grid row row--head mono" aria-hidden="true">
+      <span class="row__year">Year</span>
+      <span class="row__name">Typeface</span>
+      <span class="row__designer">Designer</span>
+      <span class="row__class">Class</span>
+      <span class="row__axes">Axes</span>
+    </div>
+    <ol class="rows">
+      {% for f in faces %}
+      <li>
+        <a class="grid row" href="{{ f.get_absolute_url }}" style="--face: '{{ f.name }}'; --hover-var: {{ f.hover_variation|default:'normal' }}">
+          <span class="row__year mono">{{ f.year }}</span>
+          <span class="row__name">{{ f.name }}</span>
+          <span class="row__designer">{{ f.designer }}</span>
+          <span class="row__class">{{ f.get_classification_display }}</span>
+          <span class="row__axes mono">{{ f.axis_tags }}<span class="row__arrow" aria-hidden="true">→</span></span>
+        </a>
+      </li>
+      {% empty %}
+      <li class="grid row row--empty"><span class="row__name">No typefaces in this class yet. <a href="?#index">Show all</a></span></li>
+      {% endfor %}
+    </ol>
+  </div>
+</section>
+
+<section class="wrap grid statement" aria-labelledby="license-h">
+  <h2 id="license-h" class="label mono">License</h2>
+  <p class="statement__text">The Open Font License lets you use, change and share these fonts, including in work you sell. The one thing it doesn't allow is selling the fonts on their own.</p>
+</section>
+
+<section class="wrap grid cta" aria-labelledby="cta-h">
+  <h2 id="cta-h" class="label mono">Submit</h2>
+  <p class="cta__text">Know an open-source typeface that belongs here?</p>
+  <a class="button cta__button" href="{% url 'myapp:submit' %}">Submit a typeface <span aria-hidden="true">→</span></a>
+</section>
+{% endblock %}

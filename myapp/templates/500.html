@@ -1,0 +1,32 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F4F4F2">
+  <script>document.documentElement.classList.add("js")</script>
+  <title>500 — Open Specimen</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="{% static 'myapp/css/site.css' %}?v=6">
+</head>
+<body>
+  {# Rendered without the database or request context, which may be what failed. #}
+  <header class="wrap grid masthead">
+    <a class="wordmark" href="/">Open Specimen</a>
+  </header>
+  <main id="main">
+    <section class="wrap grid missing">
+      <p class="label mono">Error 500</p>
+      <h1 class="missing__title">Something broke on our side.</h1>
+      <p class="missing__text">It isn't caused by anything you did. Reload in a minute, or ask the assistant to open a support ticket.</p>
+      <div class="missing__actions">
+        <button class="button" type="button" data-ask="What does error 500 mean?">Ask the assistant <span aria-hidden="true">→</span></button>
+        <a class="button button--ghost" href="/">Go to the home page</a>
+      </div>
+      {% if request_id %}<p class="missing__code mono">Reference {{ request_id }}</p>{% endif %}
+    </section>
+  </main>
+  {% include "myapp/_assistant.html" %}
+  <script src="{% static 'myapp/js/site.js' %}?v=6" defer></script>
+</body>
+</html>

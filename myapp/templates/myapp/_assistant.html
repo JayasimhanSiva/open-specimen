@@ -1,0 +1,42 @@
+<div class="assistant" data-assistant
+     data-chat-url="{% url 'myapp:chat' %}"
+     data-feedback-url="{% url 'myapp:chat_feedback' %}"
+     data-ticket-url="{% url 'myapp:ticket' %}"
+     data-faq-url="{% url 'myapp:faq' %}"
+     data-email="{{ user.email|default:'' }}">
+  <button class="assistant__launch" type="button" aria-expanded="false" aria-controls="assistant-panel" data-assistant-toggle>
+    <span class="assistant__dot" aria-hidden="true"></span>Ask the assistant
+  </button>
+
+  <section class="assistant__panel" id="assistant-panel" role="dialog" aria-modal="false" aria-labelledby="assistant-title" hidden>
+    <header class="assistant__head">
+      <div>
+        <h2 class="assistant__title" id="assistant-title">Assistant</h2>
+        <p class="assistant__sub mono">Answers from the FAQ · explains error codes</p>
+      </div>
+      <button class="assistant__close" type="button" aria-label="Close the assistant" data-assistant-toggle>
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </header>
+
+    <ol class="assistant__log" aria-live="polite" aria-label="Conversation" data-log>
+      <li class="msg msg--bot">
+        <p>Hi! Ask me about the typefaces, licensing or your account, or type an error code like <b>404</b> and I'll explain it.</p>
+      </li>
+    </ol>
+
+    <div class="assistant__suggest" data-suggest>
+      <button class="chip" type="button" data-ask="Are the fonts free to use?">Are the fonts free?</button>
+      <button class="chip" type="button" data-ask="What does error 429 mean?">What does 429 mean?</button>
+      <button class="chip" type="button" data-ask="How do I sign up?">How do I sign up?</button>
+    </div>
+
+    <form class="assistant__form" data-form novalidate>
+      <label class="visually-hidden" for="assistant-input">Your question</label>
+      <input class="assistant__input" id="assistant-input" type="text" maxlength="500" autocomplete="off" placeholder="Ask a question or paste an error code">
+      <button class="assistant__send" type="submit" aria-label="Send">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </form>
+  </section>
+</div>

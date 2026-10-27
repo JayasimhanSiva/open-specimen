@@ -1,0 +1,30 @@
+{% extends "myapp/base.html" %}
+{% block title %}FAQ — Open Specimen{% endblock %}
+{% block description %}Answers to common questions about Open Specimen, its typefaces, accounts and support.{% endblock %}
+{% block content %}
+<section class="wrap grid page-intro">
+  <p class="label mono">FAQ</p>
+  <h1 class="page-intro__title">Questions people ask.</h1>
+  <p class="page-intro__lede">{{ count }} answers, straight from our database. The assistant in the corner answers from the same list, so you can also just ask it.</p>
+</section>
+
+{% for category, items in categories.items %}
+<section class="wrap grid faq-group" aria-labelledby="cat-{{ forloop.counter }}">
+  <h2 class="label mono" id="cat-{{ forloop.counter }}">{{ category }}</h2>
+  <div class="faq-list">
+    {% for f in items %}
+    <details class="faq" id="faq-{{ f.pk }}">
+      <summary><span>{{ f.question }}</span><span class="faq__icon" aria-hidden="true"></span></summary>
+      <p class="faq__answer">{{ f.answer }}</p>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+<section class="wrap grid page-outro">
+  <p class="label mono">Still stuck?</p>
+  <p class="page-outro__text">Ask the assistant. If it can't answer, it opens a support ticket and a person replies by email.</p>
+  <button class="button page-outro__button" type="button" data-ask="">Ask the assistant <span aria-hidden="true">→</span></button>
+</section>
+{% endblock %}

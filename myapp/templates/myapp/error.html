@@ -1,0 +1,14 @@
+{% extends "myapp/base.html" %}
+{% block title %}{{ status }} — Open Specimen{% endblock %}
+{% block content %}
+<section class="wrap grid missing">
+  <p class="label mono">Error {{ status }}</p>
+  <h1 class="missing__title">{{ title }}</h1>
+  <p class="missing__text">{{ lead }}</p>
+  <div class="missing__actions">
+    <button class="button" type="button" data-ask="{{ ask }}">Ask the assistant <span aria-hidden="true">→</span></button>
+    <a class="button button--ghost" href="{% url 'myapp:home' %}#index">Back to the index</a>
+  </div>
+  {% if code %}<p class="missing__code mono">{{ code.code }} · {{ code.title }} — <a href="{{ code.get_absolute_url }}">what this code means</a></p>{% endif %}
+</section>
+{% endblock %}

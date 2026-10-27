@@ -1,0 +1,63 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F4F4F2">
+  <script>document.documentElement.classList.add("js")</script>
+  <title>{% block title %}Open Specimen — an index of open-source typefaces{% endblock %}</title>
+  <meta name="description" content="{% block description %}Ten open-source typefaces, each set in itself, with every variable axis live.{% endblock %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap">
+  {% if fonts_url %}<link rel="stylesheet" href="{{ fonts_url }}">{% endif %}
+  <link rel="stylesheet" href="{% static 'myapp/css/site.css' %}?v=6">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230E0E0E'/><text x='16' y='24' font-family='Georgia' font-size='22' fill='%23F4F4F2' text-anchor='middle'>Aa</text></svg>">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="overlay" aria-hidden="true"><div class="wrap grid">{% for i in "123456789012" %}<span></span>{% endfor %}</div></div>
+
+  <header class="wrap grid masthead">
+    <a class="wordmark" href="{% url 'myapp:home' %}">Open Specimen</a>
+    <p class="masthead__tag mono">An index of open-source type</p>
+    {% with page=request.resolver_match.url_name %}
+    <nav class="masthead__nav" aria-label="Primary">
+      {% if user.is_authenticated %}<a href="{% url 'myapp:home' %}#match">Match</a>{% endif %}
+      <a href="{% url 'myapp:home' %}#index"{% if page == "typeface" %} aria-current="page"{% endif %}>Index</a>
+      <a href="{% url 'myapp:faq' %}"{% if page == "faq" %} aria-current="page"{% endif %}>FAQ</a>
+      {% if user.is_authenticated %}<a href="{% url 'myapp:submit' %}"{% if page == "submit" %} aria-current="page"{% endif %}>Submit</a>{% endif %}
+    </nav>
+    {% if user.is_authenticated %}
+    <form class="account" method="post" action="{% url 'myapp:logout' %}">
+      {% csrf_token %}
+      <span class="account__name mono" title="Logged in as {{ user.username }}">{{ user.username }}</span>
+      <button class="account__out" type="submit">Log out</button>
+    </form>
+    {% else %}
+    <div class="account">
+      <a class="account__link" href="{% url 'myapp:login' %}"{% if page == "login" %} aria-current="page"{% endif %}>Log in</a>
+      <a class="account__link account__link--strong" href="{% url 'myapp:signup' %}"{% if page == "signup" %} aria-current="page"{% endif %}>Sign up</a>
+    </div>
+    {% endif %}
+    {% endwith %}
+    <button class="grid-toggle mono" type="button" aria-pressed="false" title="Show the layout grid (G)">Grid</button>
+  </header>
+
+  <main id="main">{% block content %}{% endblock %}</main>
+
+  <footer class="wrap grid colophon">
+    <p class="colophon__label mono">Colophon</p>
+    <p class="colophon__text">Set in Schibsted Grotesk and JetBrains Mono. Every typeface here is served by Google Fonts under the SIL Open Font License.</p>
+    <nav class="colophon__links" aria-label="Help">
+      <a href="{% url 'myapp:faq' %}">FAQ</a>
+      <a href="{% url 'myapp:errors' %}">Error codes</a>
+      <a href="{% url 'myapp:health' %}">Site health</a>
+    </nav>
+    <p class="colophon__meta mono">© {% now "Y" %} Open Specimen<br><a href="#main">Back to top ↑</a></p>
+  </footer>
+
+  {% include "myapp/_assistant.html" %}
+  <script src="{% static 'myapp/js/site.js' %}?v=6" defer></script>
+</body>
+</html>

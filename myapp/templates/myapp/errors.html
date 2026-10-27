@@ -1,0 +1,31 @@
+{% extends "myapp/base.html" %}
+{% block title %}Error codes — Open Specimen{% endblock %}
+{% block description %}Every error code Open Specimen can show, what it means and what to do about it.{% endblock %}
+{% block content %}
+<section class="wrap grid page-intro">
+  <p class="label mono">Error codes</p>
+  <h1 class="page-intro__title">What went wrong, in plain words.</h1>
+  <p class="page-intro__lede">Every code this site can show you. Paste one into the assistant and it explains it too.</p>
+</section>
+
+<section class="wrap" aria-label="Error codes">
+  <div class="grid row row--head mono codes__head" aria-hidden="true">
+    <span class="code__num">Code</span>
+    <span class="code__title">Meaning</span>
+    <span class="code__fix">What to do</span>
+  </div>
+  <ol class="codes">
+    {% for c in codes %}
+    <li class="grid code" id="code-{{ c.code }}">
+      <span class="code__num mono">{{ c.code }}{% if c.site_specific %}<em class="code__tag">This site</em>{% endif %}</span>
+      <div class="code__title">
+        <h2>{{ c.title }}</h2>
+        <p>{{ c.meaning }}</p>
+        <p class="code__when mono">{{ c.when }}</p>
+      </div>
+      <p class="code__fix">{{ c.fix }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

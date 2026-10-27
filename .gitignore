@@ -1,0 +1,23 @@
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+
+# Local data
+db.sqlite3
+db.sqlite3-journal
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build output and caches
+staticfiles/
+.fastembed_cache/
+.playwright-mcp/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
