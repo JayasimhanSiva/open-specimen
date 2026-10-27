@@ -1349,6 +1349,13 @@ def run_checks():
     else:
         since = getattr(matcher, "loading_since", None)
         waited = f" (started {round(time.monotonic() - since)}s ago)" if since else ""
+        if since and time.monotonic() - since > 60 and not getattr(matcher, "_stack_logged", False):
+            import sys
+            import traceback
+            matcher._stack_logged = True  # once: show where loading is stuck
+            for t in threading.enumerate():
+                if t.name == "warm-model" and t.ident in sys._current_frames():
+                    log.warning("Model loading stuck at:\n%s", "".join(traceback.format_stack(sys._current_frames()[t.ident])))
         checks.append(("AI model", "loading", f"Loads in the background after a restart{waited}; "
                                               "answers use keyword matching until then"))
     checks.append(("GitHub API", *github_status()))
