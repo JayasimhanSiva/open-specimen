@@ -12,7 +12,7 @@ services:
       pip install -r requirements.txt &&
       python manage.py collectstatic --noinput &&
       DATABASE_URL=sqlite:////tmp/build.sqlite3 python manage.py migrate --noinput &&
-      DATABASE_URL=sqlite:////tmp/build.sqlite3 python manage.py shell -c
+      HF_HUB_OFFLINE=0 DATABASE_URL=sqlite:////tmp/build.sqlite3 python manage.py shell -c
       "from myapp.views import warm_matcher, matcher; warm_matcher(); print('vectors saved:', matcher.save_vectors())"
     # The admin account is created from DJANGO_SUPERUSER_* (set in the Render dashboard); it's skipped if they're
     # empty or the account already exists.
@@ -33,6 +33,9 @@ services:
           property: connectionString
       - key: MATCHER_CACHE_DIR
         value: /opt/render/project/src/.fastembed_cache
+      # The model is downloaded during the build; at runtime load it from disk without asking the Hub.
+      - key: HF_HUB_OFFLINE
+        value: "1"
       - key: MONGODB_URI
         sync: false
       - key: GITHUB_TOKEN

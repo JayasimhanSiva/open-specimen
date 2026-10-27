@@ -151,12 +151,16 @@ class FontMatcher:
         try:
             if self._model is not None or self._failed:
                 return
+            self.loading_since = time.monotonic()
+            log.info("Loading the embedding model")
             from fastembed import TextEmbedding
             # One thread and small batches keep memory low enough for a 512 MB server
             model = TextEmbedding(settings.MATCHER_MODEL, cache_dir=settings.MATCHER_CACHE_DIR,
                                   providers=["CPUExecutionProvider"], threads=settings.MATCHER_THREADS)
-            self.load_vectors()
+            count = self.load_vectors()
             self._model = model
+            log.info("Embedding model ready in %.1fs with %d precomputed vectors",
+                     time.monotonic() - self.loading_since, count)
         except Exception:  # missing package, no network for the first download, corrupt cache…
             log.exception("Font matcher model unavailable; falling back to keyword matching")
             self._failed = True
@@ -1343,7 +1347,10 @@ def run_checks():
     elif matcher._failed:
         checks.append(("AI model", "degraded", "Model failed to load; the assistant is using keyword matching"))
     else:
-        checks.append(("AI model", "loading", "Loads in the background after a restart"))
+        since = getattr(matcher, "loading_since", None)
+        waited = f" (started {round(time.monotonic() - since)}s ago)" if since else ""
+        checks.append(("AI model", "loading", f"Loads in the background after a restart{waited}; "
+                                              "answers use keyword matching until then"))
     checks.append(("GitHub API", *github_status()))
     sql_ok = checks[0][1] == "ok"
     overall = "ok" if all(c[1] in ("ok", "not configured", "loading", "checking") for c in checks) else (
