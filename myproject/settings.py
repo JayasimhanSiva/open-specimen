@@ -199,6 +199,8 @@ MATCHER_CACHE_DIR = os.environ.get('MATCHER_CACHE_DIR', str(Path.home() / '.cach
 # Small batches on one thread keep the model's working memory low (the free Render plan has 512 MB).
 MATCHER_THREADS = int(os.environ.get('MATCHER_THREADS', '1'))
 MATCHER_BATCH = int(os.environ.get('MATCHER_BATCH', '8'))
+# Embeddings of every typeface, FAQ and anchor phrase, computed at build time so a slow server starts fast.
+MATCHER_VECTORS = os.environ.get('MATCHER_VECTORS', str(Path(MATCHER_CACHE_DIR) / 'open-specimen-vectors.npz'))
 
 # Third-party API: GitHub REST (google/fonts history). A token only raises the rate limit.
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')

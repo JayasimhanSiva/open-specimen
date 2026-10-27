@@ -124,6 +124,11 @@ def _phrases(text):
     return [p.strip() for p in text.split(",") if p.strip()]
 
 
+def pairing_text(face):
+    """What a typeface feels like and is for, compared when choosing a partner for it."""
+    return f"{face.mood}. Used for {face.uses}"
+
+
 class FontMatcher:
     def __init__(self):
         self._model = None
@@ -136,20 +141,46 @@ class FontMatcher:
     def engine(self):
         return "keywords" if self._failed else "embedding"
 
-    def _load(self):
+    def _load(self, wait=False):
+        """Load the model once. Requests don't wait while another thread is loading it (on a slow
+        server that takes a while); they use keyword matching until it's ready."""
         if self._model is not None or self._failed:
             return
-        with self._lock:
+        if not self._lock.acquire(blocking=wait):
+            return
+        try:
             if self._model is not None or self._failed:
                 return
-            try:
-                from fastembed import TextEmbedding
-                # One thread and small batches keep memory low enough for a 512 MB server
-                self._model = TextEmbedding(settings.MATCHER_MODEL, cache_dir=settings.MATCHER_CACHE_DIR,
-                                            providers=["CPUExecutionProvider"], threads=settings.MATCHER_THREADS)
-            except Exception:  # missing package, no network for the first download, corrupt cache…
-                log.exception("Font matcher model unavailable; falling back to keyword matching")
-                self._failed = True
+            from fastembed import TextEmbedding
+            # One thread and small batches keep memory low enough for a 512 MB server
+            model = TextEmbedding(settings.MATCHER_MODEL, cache_dir=settings.MATCHER_CACHE_DIR,
+                                  providers=["CPUExecutionProvider"], threads=settings.MATCHER_THREADS)
+            self.load_vectors()
+            self._model = model
+        except Exception:  # missing package, no network for the first download, corrupt cache…
+            log.exception("Font matcher model unavailable; falling back to keyword matching")
+            self._failed = True
+        finally:
+            self._lock.release()
+
+    def save_vectors(self, path=None):
+        """Write every embedded phrase to disk (done at build time, where CPU is plentiful)."""
+        import numpy as np
+        path = path or settings.MATCHER_VECTORS
+        keys = list(self._vectors)
+        np.savez_compressed(path, keys=np.array(keys, dtype=object),
+                            vectors=np.stack([self._vectors[k] for k in keys]))
+        return len(keys)
+
+    def load_vectors(self, path=None):
+        import numpy as np
+        path = path or settings.MATCHER_VECTORS
+        try:
+            data = np.load(path, allow_pickle=True)
+        except (OSError, ValueError):
+            return 0
+        self._vectors.update(zip(data["keys"].tolist(), data["vectors"]))
+        return len(data["keys"])
 
     def _embed(self, texts):
         """Unit vectors for texts, cached; phrases from the index are embedded once."""
@@ -162,12 +193,12 @@ class FontMatcher:
         return [self._vectors[t] for t in texts]
 
     def warm(self, faces=()):
-        self._load()
+        self._load(wait=True)
         if self._model is None:
             return
         texts = [a for anchors in AXIS_ANCHORS.values() for a in anchors[:2] if a] + list(SIZE_ANCHORS)
         for f in faces:
-            texts += [self._profile(f)] + _phrases(f.uses) + _phrases(f.mood)
+            texts += [self._profile(f), pairing_text(f)] + _phrases(f.uses) + _phrases(f.mood)
         self._embed(texts)
         self._calibrate()
 
@@ -744,8 +775,8 @@ class TypeAdvisor:
         matcher._load()
         if matcher._model is None:
             return pool[0]
-        q = matcher._embed([f"{face.mood}. Used for {face.uses}"])[0]
-        return max(pool, key=lambda f: matcher._similarity(q, [f"{f.mood}. Used for {f.uses}"])[0])
+        q = matcher._embed([pairing_text(face)])[0]
+        return max(pool, key=lambda f: matcher._similarity(q, [pairing_text(f)])[0])
 
     READING_RE = re.compile(r"\b(articles?|reading|body|books?|ebooks?|blogs?|essays?|documentation|interfaces?|"
                             r"apps?|reports?|papers?|news|websites?|dashboards?|forms|services|menus)\b", re.I)
@@ -1009,7 +1040,7 @@ class Assistant:
         return docs
 
     def warm(self):
-        matcher._load()
+        matcher._load(wait=True)
         if matcher._model is not None:
             matcher._embed([t for d in self._docs() for t in d[2]])
 
