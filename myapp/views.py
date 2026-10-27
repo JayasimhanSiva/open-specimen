@@ -167,6 +167,13 @@ class FontMatcher:
         finally:
             self._lock.release()
 
+    def reset_after_fork(self):
+        """In a forked worker the loading thread doesn't exist and the lock may be stuck held; start clean."""
+        self._lock = threading.Lock()
+        self._model = None
+        self._failed = False
+        self.loading_since = None
+
     def save_vectors(self, path=None):
         """Write every embedded phrase to disk (done at build time, where CPU is plentiful)."""
         import numpy as np
